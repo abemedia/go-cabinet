@@ -1,0 +1,23 @@
+name: Dependabot
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  merge:
+    name: Merge
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - uses: fastify/github-action-merge-dependabot@v3
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          target: minor
+          use-github-auto-merge: true

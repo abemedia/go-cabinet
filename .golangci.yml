@@ -1,0 +1,70 @@
+version: '2'
+
+linters:
+  default: all
+  disable:
+    - depguard
+    - err113
+    - errorlint
+    - exhaustive
+    - exhaustruct
+    - forcetypeassert
+    - funcorder
+    - gochecknoglobals
+    - gochecknoinits
+    - gocyclo
+    - gosec
+    - godox
+    - mnd
+    - nlreturn
+    - noinlineerr
+    - nonamedreturns
+    - paralleltest
+    - varnamelen
+    - wrapcheck
+    - wsl
+    - wsl_v5
+  settings:
+    cyclop:
+      max-complexity: 20
+    funlen:
+      # Complexity is already covered by cyclop and gocognit.
+      statements: -1
+    govet:
+      enable-all: true
+      disable: [fieldalignment]
+    nolintlint:
+      require-specific: true
+  exclusions:
+    presets:
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - funlen
+          - gocognit
+          - goconst
+          - gocritic
+        path: (.+)_test.go
+      - linters: [govet]
+        text: 'shadow: declaration of "err" shadows declaration'
+    paths:
+      - testdata
+
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+    - golines
+  settings:
+    gofmt:
+      rewrite-rules:
+        - pattern: interface{}
+          replacement: any
+    gofumpt:
+      extra-rules: true
+    golines:
+      max-len: 120
+      tab-len: 2
