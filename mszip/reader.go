@@ -1,7 +1,6 @@
 package mszip
 
 import (
-	"bytes"
 	"errors"
 	"io"
 
@@ -38,7 +37,9 @@ type flateReader interface {
 type Reader struct {
 	br     byteReader
 	fr     flateReader
-	outBuf bytes.Buffer
+	buf    [blockSize + 1]byte
+	bufLen int
+	bufPos int
 	dict   []byte
 	err    error
 }
@@ -47,7 +48,6 @@ type Reader struct {
 func NewReader(r io.Reader) *Reader {
 	rd := &Reader{dict: make([]byte, 0, blockSize)}
 	rd.br.r = r
-	rd.outBuf.Grow(blockSize)
 	rd.fr = flate.NewReaderDict(&rd.br, nil).(flateReader)
 	return rd
 }
@@ -59,8 +59,9 @@ func (r *Reader) Read(p []byte) (int, error) {
 	}
 	total := 0
 	for len(p) > 0 {
-		if r.outBuf.Len() > 0 {
-			n, _ := r.outBuf.Read(p)
+		if r.bufPos < r.bufLen {
+			n := copy(p, r.buf[r.bufPos:r.bufLen])
+			r.bufPos += n
 			p = p[n:]
 			total += n
 			continue
@@ -77,7 +78,7 @@ func (r *Reader) Read(p []byte) (int, error) {
 }
 
 // readBlock reads the next CK-prefixed compressed block and decompresses it.
-func (r *Reader) readBlock() error {
+func (r *Reader) readBlock() (err error) {
 	var ck [2]byte
 	if _, err := io.ReadFull(r.br.r, ck[:]); err != nil {
 		return err
@@ -90,14 +91,25 @@ func (r *Reader) readBlock() error {
 		return err
 	}
 
-	r.outBuf.Reset()
-	if _, err := io.Copy(&r.outBuf, r.fr); err != nil {
-		return err
+	n := 0
+	for n < blockSize+1 {
+		nn, err := r.fr.Read(r.buf[n:])
+		n += nn
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
 	}
+	if n > blockSize {
+		return errors.New("mszip: decompressed block exceeds 32 KiB")
+	}
+	r.bufLen = n
+	r.bufPos = 0
 
 	// Save the decompressed block as the dictionary for the next block.
-	r.dict = r.dict[:r.outBuf.Len()]
-	copy(r.dict, r.outBuf.Bytes())
+	r.dict = append(r.dict[:0], r.buf[:n]...)
 
 	return nil
 }
