@@ -1,0 +1,43 @@
+name: Fixtures
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - testdata/fixtures.json
+      - testdata/generate.go
+
+jobs:
+  update:
+    name: Update
+    runs-on: windows-latest
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.head_ref }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Generate fixtures
+        run: go run ./testdata/generate.go
+
+      - name: Commit if changed
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add testdata/
+          git diff --staged --quiet || git commit -m "chore: update fixtures"
+          git push

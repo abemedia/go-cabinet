@@ -1,0 +1,79 @@
+[
+  {
+    "name": "example",
+    "folders": [
+      {
+        "compression": "none",
+        "files": [
+          { "name": "README.md", "content": "This is an example cabinet file.", "mtime": "2000-06-15T08:30:00Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "uncompressed",
+    "folders": [
+      {
+        "compression": "none",
+        "files": [
+          { "name": "small.txt", "type": "text", "size": 64, "mtime": "2000-06-15T08:30:00Z" },
+          { "name": "large.bin", "type": "binary", "size": 100000, "mtime": "2001-03-20T14:45:16Z" },
+          { "name": "subdir/file.txt", "type": "text", "size": 512, "mtime": "2003-02-14T10:20:00Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "mszip",
+    "folders": [
+      {
+        "compression": "mszip",
+        "files": [
+          { "name": "small.txt", "type": "text", "size": 64, "mtime": "2000-06-15T08:30:00Z" },
+          { "name": "large.bin", "type": "binary", "size": 100000, "mtime": "2001-03-20T14:45:16Z" },
+          { "name": "subdir/file.txt", "type": "text", "size": 512, "mtime": "2003-02-14T10:20:00Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "mixed_compression",
+    "folders": [
+      {
+        "compression": "mszip",
+        "files": [{ "name": "compressed.txt", "type": "text", "size": 256, "mtime": "1999-12-31T23:59:58Z" }]
+      },
+      {
+        "compression": "none",
+        "files": [{ "name": "plain.txt", "type": "text", "size": 128, "mtime": "2010-05-10T12:00:00Z" }]
+      }
+    ]
+  },
+  {
+    "name": "attributes",
+    "folders": [
+      {
+        "compression": "none",
+        "files": [
+          { "name": "readonly.txt", "type": "text", "size": 64, "attrs": "R", "mtime": "1998-06-16T11:30:20Z" },
+          { "name": "hidden.txt", "type": "text", "size": 64, "attrs": "H", "mtime": "2001-09-11T08:00:00Z" },
+          { "name": "system.txt", "type": "text", "size": 64, "attrs": "S", "mtime": "2007-03-25T15:45:00Z" },
+          { "name": "archive.txt", "type": "text", "size": 64, "attrs": "A", "mtime": "2009-12-25T00:00:00Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "empty_file",
+    "folders": [
+      {
+        "compression": "none",
+        "files": [{ "name": "plain.txt", "type": "text", "size": 0, "mtime": "1980-01-01T00:00:00Z" }]
+      },
+      {
+        "compression": "mszip",
+        "files": [{ "name": "compressed.txt", "type": "text", "size": 0, "mtime": "1980-01-01T00:00:00Z" }]
+      }
+    ]
+  }
+]
