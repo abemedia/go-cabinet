@@ -1,6 +1,6 @@
 # go-cabinet: Pure Go Microsoft Cabinet File Reader & Writer
 
-<img align="right" width="150" alt="" src="assets/logo.png">
+<img align="right" width="125" alt="" src="assets/logo_small.png">
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/abemedia/go-cabinet.svg)](https://pkg.go.dev/github.com/abemedia/go-cabinet)
 [![Go Report Card](https://goreportcard.com/badge/github.com/abemedia/go-cabinet)](https://goreportcard.com/report/github.com/abemedia/go-cabinet)
