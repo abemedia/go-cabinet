@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -78,8 +79,8 @@ func TestOutOfOrder(t *testing.T) {
 	}
 
 	// Read in reverse order.
-	for i := len(r.Files) - 1; i >= 0; i-- {
-		rc, err := r.Files[i].Open()
+	for i, f := range slices.Backward(r.Files) {
+		rc, err := f.Open()
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}

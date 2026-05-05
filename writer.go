@@ -187,7 +187,15 @@ func (w *Writer) addFile(name, path string, info fs.FileInfo, open func(string) 
 		Modified: info.ModTime(),
 		NonUTF8:  isNonUTF8(name),
 	}
-	populateAttrs(&fh, info)
+	if src, ok := info.Sys().(*FileHeader); ok {
+		fh.ReadOnly = src.ReadOnly
+		fh.Hidden = src.Hidden
+		fh.System = src.System
+		fh.Archive = src.Archive
+		fh.Exec = src.Exec
+	} else {
+		populateAttrs(&fh, info)
+	}
 	w.current.files = append(w.current.files, &fileEntry{
 		fh:   fh,
 		size: uint32(size),

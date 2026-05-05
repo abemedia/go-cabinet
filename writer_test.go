@@ -95,6 +95,56 @@ func TestWriter_AddFS(t *testing.T) {
 	}
 }
 
+// TestWriter_AddFS_Roundtrip verifies that AddFS over a Reader's fs.FS
+// preserves FileHeader attribute fields.
+func TestWriter_AddFS_Roundtrip(t *testing.T) {
+	fh := cabinet.FileHeader{
+		Name:     "test.txt",
+		Modified: time.Date(2024, 6, 15, 12, 30, 42, 0, time.UTC),
+		ReadOnly: true,
+		Hidden:   true,
+		System:   true,
+		Archive:  true,
+		Exec:     true,
+		NonUTF8:  true,
+	}
+
+	var src seekBuffer
+	w := cabinet.NewWriter(&src)
+	wr, err := w.CreateHeader(&fh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wr.Write([]byte("content")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := cabinet.NewReader(bytes.NewReader(src.buf))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+
+	var dst seekBuffer
+	w = cabinet.NewWriter(&dst)
+	if err := w.AddFS(r); err != nil {
+		t.Fatalf("AddFS: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	r, err = cabinet.NewReader(bytes.NewReader(dst.buf))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+	if got := r.Files[0].FileHeader; got != fh {
+		t.Errorf("header mismatch:\ngot %+v\nwant %+v", got, fh)
+	}
+}
+
 // TestWriter_AddPath tests adding a single file and a directory tree.
 func TestWriter_AddPath(t *testing.T) {
 	tests := []struct {

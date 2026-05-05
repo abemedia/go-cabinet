@@ -23,7 +23,7 @@ func (fi fileInfo) Mode() fs.FileMode {
 }
 func (fi fileInfo) ModTime() time.Time         { return fi.f.Modified }
 func (fi fileInfo) IsDir() bool                { return false }
-func (fi fileInfo) Sys() any                   { return nil }
+func (fi fileInfo) Sys() any                   { return &fi.f.FileHeader }
 func (fi fileInfo) Type() fs.FileMode          { return 0 }
 func (fi fileInfo) Info() (fs.FileInfo, error) { return fi, nil }
 
