@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/abemedia/go-cabinet/compare/v0.1.0...v0.2.0) (2026-05-05)
+
+
+### Features
+
+* expose FileHeader via fs.FileInfo.Sys() and preserve attributes on AddFS roundtrip ([#6](https://github.com/abemedia/go-cabinet/issues/6)) ([3814efd](https://github.com/abemedia/go-cabinet/commit/3814efd89139434c0501666ae1538e9f44aec6ef))
+
 ## [0.1.0](https://github.com/abemedia/go-cabinet/compare/v0.0.1...v0.1.0) (2026-04-03)
 
 
