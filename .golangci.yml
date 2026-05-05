@@ -49,6 +49,8 @@ linters:
         path: (.+)_test.go
       - linters: [govet]
         text: 'shadow: declaration of "err" shadows declaration'
+      - linters: [goconst]
+        source: 'fs\.PathError'
     paths:
       - testdata
 
