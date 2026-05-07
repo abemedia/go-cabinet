@@ -75,5 +75,21 @@
         "files": [{ "name": "compressed.txt", "type": "text", "size": 0, "mtime": "1980-01-01T00:00:00Z" }]
       }
     ]
+  },
+  {
+    "name": "reserves",
+    "options": {
+      "reservePerCabinet": 8,
+      "reservePerFolder": 4,
+      "reservePerDataBlock": 2
+    },
+    "folders": [
+      {
+        "compression": "mszip",
+        "files": [
+          { "name": "with_reserves.txt", "type": "text", "size": 256, "mtime": "2005-01-01T00:00:00Z" }
+        ]
+      }
+    ]
   }
 ]
