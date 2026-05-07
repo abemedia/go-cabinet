@@ -39,8 +39,16 @@ type Folder struct {
 	Files       []FileSpec `json:"files"`
 }
 
+// Options sets per-cabinet makecab DDF directives. Zero values are omitted.
+type Options struct {
+	ReservePerCabinet   int `json:"reservePerCabinet"`
+	ReservePerFolder    int `json:"reservePerFolder"`
+	ReservePerDataBlock int `json:"reservePerDataBlock"`
+}
+
 type Fixture struct {
 	Name    string   `json:"name"`
+	Options Options  `json:"options"`
 	Folders []Folder `json:"folders"`
 }
 
@@ -186,7 +194,10 @@ func writeDDF(ddfPath, cabPath, srcDir string, fix Fixture) error {
 .Set CabinetNameTemplate={{.CabPath}}
 .Set DiskDirectoryTemplate=
 .Set Cabinet=on
-{{range $i, $e := .Entries}}{{if gt $i 0}}.New Folder
+{{if .ReservePerCabinet}}.Set ReservePerCabinetSize={{.ReservePerCabinet}}
+{{end}}{{if .ReservePerFolder}}.Set ReservePerFolderSize={{.ReservePerFolder}}
+{{end}}{{if .ReservePerDataBlock}}.Set ReservePerDataBlockSize={{.ReservePerDataBlock}}
+{{end}}{{range $i, $e := .Entries}}{{if gt $i 0}}.New Folder
 {{end}}.Set Compress={{if eq $e.Comp "NONE"}}off{{else}}on
 .Set CompressionType={{$e.Comp}}{{end}}
 {{range $e.Files}}.Set DestinationDir="{{.Dir}}"
@@ -204,8 +215,11 @@ func writeDDF(ddfPath, cabPath, srcDir string, fix Fixture) error {
 		Files []fileEntry
 	}
 	type data struct {
-		CabPath string
-		Entries []folderEntry
+		CabPath             string
+		ReservePerCabinet   int
+		ReservePerFolder    int
+		ReservePerDataBlock int
+		Entries             []folderEntry
 	}
 
 	entries := make([]folderEntry, 0, len(fix.Folders))
@@ -232,7 +246,13 @@ func writeDDF(ddfPath, cabPath, srcDir string, fix Fixture) error {
 
 	tmpl := template.Must(template.New("ddf").Parse(ddfTmpl))
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data{CabPath: cabPath, Entries: entries}); err != nil {
+	if err := tmpl.Execute(&buf, data{
+		CabPath:             cabPath,
+		ReservePerCabinet:   fix.Options.ReservePerCabinet,
+		ReservePerFolder:    fix.Options.ReservePerFolder,
+		ReservePerDataBlock: fix.Options.ReservePerDataBlock,
+		Entries:             entries,
+	}); err != nil {
 		return fmt.Errorf("execute ddf template: %w", err)
 	}
 	return os.WriteFile(ddfPath, buf.Bytes(), 0o644)
