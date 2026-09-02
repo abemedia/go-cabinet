@@ -8,13 +8,14 @@ linters:
     - errorlint
     - exhaustive
     - exhaustruct
+    - exhaustruct_v5
     - forcetypeassert
     - funcorder
     - gochecknoglobals
     - gochecknoinits
     - gocyclo
-    - gosec
     - godox
+    - gosec
     - mnd
     - nlreturn
     - noinlineerr
@@ -66,7 +67,10 @@ formatters:
         - pattern: interface{}
           replacement: any
     gofumpt:
-      extra-rules: true
+      extra:
+        group-params: true
+        clothe-returns: true
+        balance-calls: true
     golines:
       max-len: 120
       tab-len: 2
