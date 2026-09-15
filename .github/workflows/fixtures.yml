@@ -8,6 +8,9 @@ on:
       - testdata/fixtures.json
       - testdata/generate.go
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+
 jobs:
   update:
     name: Update
