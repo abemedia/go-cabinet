@@ -30,8 +30,34 @@
         "compression": "mszip",
         "files": [
           { "name": "small.txt", "type": "text", "size": 64, "mtime": "2000-06-15T08:30:00Z" },
+          { "name": "text.txt", "type": "text", "size": 200000, "mtime": "2002-08-08T09:10:12Z" },
+          { "name": "code.bin", "type": "code", "size": 100000, "mtime": "2004-04-04T04:04:04Z" },
           { "name": "large.bin", "type": "binary", "size": 100000, "mtime": "2001-03-20T14:45:16Z" },
           { "name": "subdir/file.txt", "type": "text", "size": 512, "mtime": "2003-02-14T10:20:00Z" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "lzx",
+    "folders": [
+      {
+        "compression": "lzx",
+        "compressionMemory": 21,
+        "files": [
+          { "name": "small.txt", "type": "text", "size": 64, "mtime": "2000-06-15T08:30:00Z" },
+          { "name": "text.txt", "type": "text", "size": 400000, "mtime": "2002-08-08T09:10:12Z" },
+          { "name": "code.bin", "type": "code", "size": 150000, "mtime": "2004-04-04T04:04:04Z" },
+          { "name": "large.bin", "type": "binary", "size": 100000, "mtime": "2001-03-20T14:45:16Z" },
+          { "name": "subdir/file.txt", "type": "text", "size": 512, "mtime": "2003-02-14T10:20:00Z" }
+        ]
+      },
+      {
+        "compression": "lzx",
+        "compressionMemory": 15,
+        "files": [
+          { "name": "window15/text.txt", "type": "text", "size": 100000, "mtime": "2006-06-06T06:06:06Z" },
+          { "name": "window15/code.bin", "type": "code", "size": 60000, "mtime": "2008-08-08T08:08:08Z" }
         ]
       }
     ]
@@ -46,6 +72,10 @@
       {
         "compression": "none",
         "files": [{ "name": "plain.txt", "type": "text", "size": 128, "mtime": "2010-05-10T12:00:00Z" }]
+      },
+      {
+        "compression": "lzx",
+        "files": [{ "name": "lzx.txt", "type": "text", "size": 384, "mtime": "2012-11-11T11:11:10Z" }]
       }
     ]
   },
@@ -73,6 +103,10 @@
       {
         "compression": "mszip",
         "files": [{ "name": "compressed.txt", "type": "text", "size": 0, "mtime": "1980-01-01T00:00:00Z" }]
+      },
+      {
+        "compression": "lzx",
+        "files": [{ "name": "lzx.txt", "type": "text", "size": 0, "mtime": "1980-01-01T00:00:00Z" }]
       }
     ]
   },

@@ -2,6 +2,8 @@ package cabinet_test
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"os"
@@ -214,6 +216,80 @@ func TestWriter_AddPath(t *testing.T) {
 	}
 }
 
+// TestWriter_RegisterCompressor verifies that a Writer's compressor overrides the package-level one.
+func TestWriter_RegisterCompressor(t *testing.T) {
+	orig, _ := cabinet.Compressors.Load(cabinet.LZX)
+	t.Cleanup(func() { cabinet.Compressors.Store(cabinet.LZX, orig) })
+
+	errPkg, errWriter := errors.New("package"), errors.New("writer")
+	cabinet.RegisterCompressor(cabinet.LZX, func(int, int) (cabinet.Encoder, error) { return nil, errPkg })
+
+	w := cabinet.NewWriter(&seekBuffer{})
+	if err := w.SetCompression(cabinet.LZX); !errors.Is(err, errPkg) {
+		t.Error("SetCompression did not use the package-level compressor")
+	}
+	w.RegisterCompressor(cabinet.LZX, func(int, int) (cabinet.Encoder, error) { return nil, errWriter })
+	if err := w.SetCompression(cabinet.LZX); !errors.Is(err, errWriter) {
+		t.Error("SetCompression did not use the Writer's compressor")
+	}
+}
+
+// TestWriter_SetCompression verifies that changing the compression starts a new folder.
+func TestWriter_SetCompression(t *testing.T) {
+	var buf seekBuffer
+	w := cabinet.NewWriter(&buf)
+	for i, c := range []cabinet.Compression{cabinet.MSZIP, cabinet.LZX} {
+		if err := w.SetCompression(c); err != nil {
+			t.Fatal(err)
+		}
+		wr, err := w.Create(fmt.Sprintf("file%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := wr.Write([]byte("data")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := cabinet.NewReader(bytes.NewReader(buf.buf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []cabinet.Compression{cabinet.MSZIP, cabinet.LZXWindow(21)} {
+		if got := r.Files[i].FolderIndex(); int(got) != i {
+			t.Errorf("file %d: folder index %d, want %d", i, got, i)
+		}
+		if got := r.Files[i].Compression(); got != want {
+			t.Errorf("file %d: Compression() = %v, want %v", i, got, want)
+		}
+	}
+}
+
+// TestWriter_SetCompression_Errors verifies that SetCompression rejects a value the writer cannot compress.
+func TestWriter_SetCompression_Errors(t *testing.T) {
+	tests := []struct {
+		name string
+		comp cabinet.Compression
+		want string
+	}{
+		{"invalid window", cabinet.LZXWindow(14), "lzx: invalid window size 14: want value in range [15, 21]"},
+		{"window out of range", cabinet.LZXWindow(32), "cabinet: unsupported compression algorithm"},
+		{"unregistered method", cabinet.Quantum, "cabinet: unsupported compression algorithm"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf seekBuffer
+			w := cabinet.NewWriter(&buf)
+			if err := w.SetCompression(tt.comp); err == nil || err.Error() != tt.want {
+				t.Fatalf("SetCompression: got error %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 // TestAutoSplit verifies that a folder exceeding the threshold is split into multiple folders.
 func TestAutoSplit(t *testing.T) {
 	const threshold = 1 << 20 // 1 MB
@@ -223,7 +299,6 @@ func TestAutoSplit(t *testing.T) {
 
 	var buf seekBuffer
 	w := cabinet.NewWriter(&buf)
-	w.SetCompression(cabinet.None)
 	for _, name := range []string{"a.txt", "b.txt", "c.txt"} {
 		wr, err := w.Create(name)
 		if err != nil {
@@ -263,23 +338,6 @@ func TestAutoSplit(t *testing.T) {
 		if !bytes.Equal(got, data) {
 			t.Errorf("file %d (%q): content mismatch (%d bytes, want %d)", i, f.Name, len(got), len(data))
 		}
-	}
-}
-
-// TestAlgorithmError verifies that an unregistered compressor returns ErrAlgorithm.
-func TestAlgorithmError(t *testing.T) {
-	var buf seekBuffer
-	w := cabinet.NewWriter(&buf)
-	w.SetCompression(cabinet.Quantum)
-	wr, err := w.Create("test.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := wr.Write([]byte("data")); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Close(); err == nil {
-		t.Fatal("expected ErrAlgorithm from Close, got nil")
 	}
 }
 

@@ -16,4 +16,8 @@ func SetAutoSplitThreshold(t *testing.T, n uint64) {
 	t.Cleanup(func() { autoSplitThreshold = orig })
 }
 
-var ErrDuplicate = errDuplicate
+var (
+	ErrDuplicate  = errDuplicate
+	Compressors   = &compressors
+	Decompressors = &decompressors
+)

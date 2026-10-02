@@ -76,7 +76,7 @@ func ExampleReader() {
 }
 
 func ExampleWriter_RegisterCompressor() {
-	// Override the default MS-ZIP compressor with a higher compression level.
+	// Override the default MSZIP compressor with a higher compression level.
 
 	// Create a file to write our archive to.
 	f, err := os.CreateTemp("", "example-*.cab")
@@ -88,9 +88,9 @@ func ExampleWriter_RegisterCompressor() {
 	// Create a new cabinet archive.
 	w := cabinet.NewWriter(f)
 
-	// Register a custom MS-ZIP compressor.
-	w.RegisterCompressor(cabinet.MSZip, func(out io.Writer) (io.WriteCloser, error) {
-		return mszip.NewWriter(out, mszip.BestCompression)
+	// Register a custom MSZIP compressor.
+	w.RegisterCompressor(cabinet.MSZIP, func(int, int) (cabinet.Encoder, error) {
+		return mszip.NewEncoder(mszip.BestCompression)
 	})
 
 	// Proceed to add files to w.

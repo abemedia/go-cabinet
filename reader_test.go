@@ -2,6 +2,7 @@ package cabinet_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"slices"
@@ -16,7 +17,6 @@ import (
 func TestFS(t *testing.T) {
 	var buf seekBuffer
 	w := cabinet.NewWriter(&buf)
-	w.SetCompression(cabinet.MSZip)
 
 	fsys := fstest.MapFS{
 		"a.txt":       &fstest.MapFile{Data: []byte("root file")},
@@ -51,7 +51,6 @@ func TestOutOfOrder(t *testing.T) {
 
 	var buf seekBuffer
 	w := cabinet.NewWriter(&buf)
-	w.SetCompression(cabinet.MSZip)
 	for i, d := range data {
 		name := strings.Repeat("x", i) + ".txt"
 		wr, err := w.Create(name)
@@ -109,7 +108,6 @@ func TestChecksum(t *testing.T) {
 
 	var buf seekBuffer
 	w := cabinet.NewWriter(&buf)
-	w.SetCompression(cabinet.MSZip)
 	wr, _ := w.Create("test.txt")
 	if _, err := wr.Write(bytes.Repeat([]byte("checksum test data "), 200)); err != nil {
 		t.Fatal(err)
@@ -143,6 +141,108 @@ func TestChecksum(t *testing.T) {
 				t.Errorf("got error %v, want %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestBlockSizeMismatch corrupts the uncompressed size of a CFDATA block and
+// verifies that reading it returns ErrFormat.
+func TestBlockSizeMismatch(t *testing.T) {
+	for _, comp := range []cabinet.Compression{cabinet.None, cabinet.MSZIP, cabinet.LZX} {
+		t.Run(comp.String(), func(t *testing.T) {
+			var buf seekBuffer
+			w := cabinet.NewWriter(&buf)
+			if err := w.SetCompression(comp); err != nil {
+				t.Fatal(err)
+			}
+			wr, err := w.Create("test.txt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := wr.Write([]byte("data")); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			// The uncompressed size is at offset 6 of the CFDATA block, whose offset
+			// is the first field of the CFFOLDER entry following the 36-byte header.
+			cfDataOff := int(binary.LittleEndian.Uint32(buf.buf[36:]))
+			buf.buf[cfDataOff+6]--
+
+			r, err := cabinet.NewReader(bytes.NewReader(buf.buf))
+			if err != nil {
+				t.Fatalf("NewReader: %v", err)
+			}
+			r.SkipChecksum = true
+			rc, err := r.Files[0].Open()
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer rc.Close()
+			if _, err := io.ReadAll(rc); !errors.Is(err, cabinet.ErrFormat) {
+				t.Fatalf("got error %v, want %v", err, cabinet.ErrFormat)
+			}
+		})
+	}
+}
+
+// TestUnsupportedCompression verifies that opening a file in a folder with an
+// unsupported compression method returns ErrAlgorithm.
+func TestUnsupportedCompression(t *testing.T) {
+	var buf seekBuffer
+	w := cabinet.NewWriter(&buf)
+	wr, err := w.Create("test.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wr.Write([]byte("data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mark the folder as Quantum compressed. The first CFFOLDER entry follows
+	// the 36-byte header, with the compression type at offset 6.
+	buf.buf[42] = 2
+
+	r, err := cabinet.NewReader(bytes.NewReader(buf.buf))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+	if _, err := r.Files[0].Open(); !errors.Is(err, cabinet.ErrAlgorithm) {
+		t.Fatalf("got error %v, want %v", err, cabinet.ErrAlgorithm)
+	}
+}
+
+// TestReader_RegisterDecompressor verifies that a Reader's decompressor overrides the package-level one.
+func TestReader_RegisterDecompressor(t *testing.T) {
+	var buf seekBuffer
+	w := cabinet.NewWriter(&buf)
+	if _, err := w.Create("test.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, _ := cabinet.Decompressors.Load(cabinet.MSZIP)
+	t.Cleanup(func() { cabinet.Decompressors.Store(cabinet.MSZIP, orig) })
+
+	errPkg, errReader := errors.New("package"), errors.New("reader")
+	cabinet.RegisterDecompressor(cabinet.MSZIP, func(int, int) (cabinet.Decoder, error) { return nil, errPkg })
+
+	r, err := cabinet.NewReader(bytes.NewReader(buf.buf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Files[0].Open(); !errors.Is(err, errPkg) {
+		t.Error("Open did not use the package-level decompressor")
+	}
+	r.RegisterDecompressor(cabinet.MSZIP, func(int, int) (cabinet.Decoder, error) { return nil, errReader })
+	if _, err := r.Files[0].Open(); !errors.Is(err, errReader) {
+		t.Error("Open did not use the Reader's decompressor")
 	}
 }
 
