@@ -12,6 +12,7 @@ package main
 import (
 	"bytes"
 	"cmp"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -35,8 +36,9 @@ type FileSpec struct {
 }
 
 type Folder struct {
-	Compression string     `json:"compression"`
-	Files       []FileSpec `json:"files"`
+	Compression       string     `json:"compression"`
+	CompressionMemory int        `json:"compressionMemory"`
+	Files             []FileSpec `json:"files"`
 }
 
 // Options sets per-cabinet makecab DDF directives. Zero values are omitted.
@@ -166,7 +168,8 @@ func generateFixture(testdataDir string, fix Fixture) error {
 // generateContent returns deterministic pseudo-random content for a fixture file.
 // The output is fully determined by fixtureName+fileName so re-running the generator
 // produces identical source files and identical .cab outputs.
-// "text" uses printable ASCII, "binary" uses raw bytes.
+// "text" is prose and "code" resembles x86 machine code, both of which compress
+// well. "binary" is random bytes, which do not compress.
 func generateContent(fixtureName, fileName, typ string, size int) []byte {
 	if size == 0 {
 		return []byte{}
@@ -175,17 +178,105 @@ func generateContent(fixtureName, fileName, typ string, size int) []byte {
 	h.Write([]byte(fixtureName + "/" + fileName))
 	rng := rand.New(rand.NewPCG(h.Sum64(), 0))
 
+	switch typ {
+	case "text":
+		return generateText(rng, size)
+	case "code":
+		return generateCode(rng, size)
+	}
 	buf := make([]byte, size)
 	for i := range buf {
 		buf[i] = byte(rng.IntN(256))
 	}
-	if typ == "text" {
-		const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \n"
-		for i, b := range buf {
-			buf[i] = charset[int(b)%len(charset)]
+	return buf
+}
+
+var words = strings.Fields(`the of and to in is that it was for on are as with his they at be this from
+have or by one had not but what all were when we there can an your which their said if do will each
+about how up out them then she many some so these would other into has more her two like him see time
+could no make than first been its who now people my made over did down only way find use may water
+long little very after words called just where most know`)
+
+// generateText returns prose built from a small vocabulary. Now and then it
+// repeats a passage from anywhere earlier in the text, so that matches occur
+// at long distances as well as short ones.
+func generateText(rng *rand.Rand, size int) []byte {
+	buf := make([]byte, 0, size+1024)
+	for len(buf) < size {
+		if len(buf) > 0 && rng.IntN(400) == 0 {
+			start := rng.IntN(len(buf))
+			start += bytes.IndexAny(buf[start:], " \n") + 1
+			end := min(start+64+rng.IntN(960), len(buf))
+			end += bytes.IndexAny(buf[end-1:], " \n")
+			buf = append(buf, buf[start:end]...)
+			continue
+		}
+		buf = append(buf, words[int(rng.ExpFloat64()*12)%len(words)]...)
+		switch rng.IntN(16) {
+		case 0:
+			buf = append(buf, ".\n"...)
+		case 1:
+			buf = append(buf, ", "...)
+		default:
+			buf = append(buf, ' ')
 		}
 	}
-	return buf
+	return buf[:size]
+}
+
+// generateCode returns data resembling x86 machine code: functions aligned to
+// 16 bytes that call a small set of addresses, and tables of 16-byte records.
+// The calls exercise LZX's E8 translation and the alignment its aligned offsets.
+func generateCode(rng *rand.Rand, size int) []byte {
+	instructions := [][]byte{
+		{0x90},
+		{0x31, 0xC0},
+		{0x85, 0xC0},
+		{0x74, 0x0C},
+		{0x75, 0xF2},
+		{0x8B, 0x45, 0xFC},
+		{0x89, 0x45, 0xFC},
+		{0x0F, 0xB6, 0x00},
+		{0x48, 0x89, 0xC7},
+		{0x48, 0x8B, 0x45, 0xF8},
+		{0x48, 0x89, 0x45, 0xF0},
+		{0x48, 0x8D, 0x4D, 0xE0},
+	}
+	prologue := []byte{0x55, 0x48, 0x89, 0xE5, 0x48, 0x83, 0xEC, 0x20}
+	epilogue := []byte{0x48, 0x83, 0xC4, 0x20, 0x5D, 0xC3}
+	targets := make([]int, 64)
+	for i := range targets {
+		targets[i] = rng.IntN(size) &^ 15
+	}
+
+	buf := make([]byte, 0, size+4096)
+	for len(buf) < size {
+		if rng.IntN(16) == 0 {
+			base := uint32(rng.IntN(size))
+			for i := range uint32(8 + rng.IntN(56)) {
+				buf = binary.LittleEndian.AppendUint32(buf, base+24*i)
+				buf = binary.LittleEndian.AppendUint32(buf, 0)
+				buf = binary.LittleEndian.AppendUint16(buf, uint16(i))
+				buf = append(buf, 0, 0, 0x40, 0, 0, 0)
+			}
+			continue
+		}
+		buf = append(buf, prologue...)
+		for range 4 + rng.IntN(60) {
+			if rng.IntN(6) == 0 {
+				target := targets[rng.IntN(len(targets))]
+				buf = append(buf, 0xE8)
+				buf = binary.LittleEndian.AppendUint32(buf, uint32(target-len(buf)-4))
+				continue
+			}
+			buf = append(buf, instructions[rng.IntN(len(instructions))]...)
+		}
+		buf = append(buf, epilogue...)
+		for len(buf)%16 != 0 {
+			buf = append(buf, 0xCC)
+		}
+	}
+	return buf[:size]
 }
 
 // writeDDF writes a makecab Directive Definition File.
@@ -199,7 +290,8 @@ func writeDDF(ddfPath, cabPath, srcDir string, fix Fixture) error {
 {{end}}{{if .ReservePerDataBlock}}.Set ReservePerDataBlockSize={{.ReservePerDataBlock}}
 {{end}}{{range $i, $e := .Entries}}{{if gt $i 0}}.New Folder
 {{end}}.Set Compress={{if eq $e.Comp "NONE"}}off{{else}}on
-.Set CompressionType={{$e.Comp}}{{end}}
+.Set CompressionType={{$e.Comp}}{{end}}{{if $e.Memory}}
+.Set CompressionMemory={{$e.Memory}}{{end}}
 {{range $e.Files}}.Set DestinationDir="{{.Dir}}"
 "{{.Src}}" "{{.Base}}" /attr={{.Attr}}
 {{end}}{{end}}`
@@ -211,8 +303,9 @@ func writeDDF(ddfPath, cabPath, srcDir string, fix Fixture) error {
 		Attr string
 	}
 	type folderEntry struct {
-		Comp  string
-		Files []fileEntry
+		Comp   string
+		Memory int
+		Files  []fileEntry
 	}
 	type data struct {
 		CabPath             string
@@ -239,8 +332,9 @@ func writeDDF(ddfPath, cabPath, srcDir string, fix Fixture) error {
 			})
 		}
 		entries = append(entries, folderEntry{
-			Comp:  strings.ToUpper(folder.Compression),
-			Files: files,
+			Comp:   strings.ToUpper(folder.Compression),
+			Memory: folder.CompressionMemory,
+			Files:  files,
 		})
 	}
 
