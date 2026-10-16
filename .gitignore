@@ -14,6 +14,9 @@ coverage.*
 *.coverprofile
 profile.cov
 
+# Benchmark data, downloaded with `go test -bench . -download`
+testdata/bench/
+
 # Go workspace file
 go.work
 go.work.sum

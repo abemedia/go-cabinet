@@ -16,6 +16,7 @@ linters:
     - gocyclo
     - godox
     - gosec
+    - ireturn
     - mnd
     - nlreturn
     - noinlineerr
@@ -43,6 +44,7 @@ linters:
       - std-error-handling
     rules:
       - linters:
+          - cyclop
           - funlen
           - gocognit
           - goconst

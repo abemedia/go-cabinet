@@ -106,14 +106,31 @@ if err := w.AddPath("", "./my-app-files"); err != nil {
 }
 ```
 
+MSZIP is used unless another method is selected with `SetCompression`. LZX produces noticeably smaller cabinets than MSZIP but compresses more slowly:
+
+```go
+if err := w.SetCompression(cabinet.LZX); err != nil {
+  return err
+}
+```
+
+The compressor used for a method can be replaced with `RegisterCompressor`, for example to change the deflate level of MSZIP:
+
+```go
+w.RegisterCompressor(cabinet.MSZIP, func(int, int) (cabinet.Encoder, error) {
+  return mszip.NewEncoder(mszip.BestCompression)
+})
+```
+
 See the [package documentation](https://pkg.go.dev/github.com/abemedia/go-cabinet) for further examples.
 
 ## Supported Compression Algorithms
 
 - **None** (e.g. uncompressed)
-- **MS-Zip** (default)
+- **MSZIP** (default)
+- **LZX** (with a 2 MiB window by default)
 
-The LZX and Quantum compression methods are not yet implemented, however custom compressors/decompressors can be registered via `RegisterCompressor` / `RegisterDecompressor`.
+The Quantum compression method is not implemented, but a codec for it can be registered with `RegisterCompressor` and `RegisterDecompressor`.
 
 ## Limitations
 

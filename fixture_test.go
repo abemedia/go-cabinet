@@ -45,8 +45,9 @@ func loadAllCabTests(t *testing.T) []CabTest {
 	var fixtures []struct {
 		Name    string `json:"name"`
 		Folders []struct {
-			Compression string `json:"compression"`
-			Files       []struct {
+			Compression       string `json:"compression"`
+			CompressionMemory int    `json:"compressionMemory"`
+			Files             []struct {
 				Name  string    `json:"name"`
 				Attrs string    `json:"attrs,omitempty"`
 				MTime time.Time `json:"mtime,omitzero"`
@@ -68,11 +69,12 @@ func loadAllCabTests(t *testing.T) []CabTest {
 			case "none":
 				folder.Comp = cabinet.None
 			case "mszip":
-				folder.Comp = cabinet.MSZip
+				folder.Comp = cabinet.MSZIP
 			case "lzx":
 				folder.Comp = cabinet.LZX
-			case "quantum":
-				folder.Comp = cabinet.Quantum
+				if fixtureFolder.CompressionMemory != 0 {
+					folder.Comp = cabinet.LZXWindow(fixtureFolder.CompressionMemory)
+				}
 			default:
 				t.Fatalf("invalid compression: %s", fixtureFolder.Compression)
 			}
@@ -185,7 +187,9 @@ func TestWriter(t *testing.T) {
 			w := cabinet.NewWriter(tmp)
 			for _, testFolder := range test.Folders {
 				w.FlushFolder()
-				w.SetCompression(testFolder.Comp)
+				if err := w.SetCompression(testFolder.Comp); err != nil {
+					t.Fatal(err)
+				}
 				for _, testFile := range testFolder.Files {
 					wr, err := w.CreateHeader(&testFile.Header)
 					if err != nil {
