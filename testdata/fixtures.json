@@ -38,6 +38,74 @@
     ]
   },
   {
+    "name": "lzx",
+    "folders": [
+      {
+        "compression": "lzx",
+        "compressionMemory": 15,
+        "files": [
+          { "name": "window15/random.bin", "type": "random", "size": 32768, "mtime": "2000-06-15T08:30:00Z" },
+          { "name": "window15/text.txt", "type": "text", "size": 40000, "mtime": "2001-03-20T14:45:16Z" },
+          { "name": "window15/code.bin", "type": "code", "size": 40000, "mtime": "2003-02-14T10:20:00Z" }
+        ]
+      },
+      {
+        "compression": "lzx",
+        "compressionMemory": 16,
+        "files": [
+          { "name": "window16/random.bin", "type": "random", "size": 32768, "mtime": "2000-06-15T08:30:00Z" },
+          { "name": "window16/text.txt", "type": "text", "size": 40000, "mtime": "2001-03-20T14:45:16Z" },
+          { "name": "window16/code.bin", "type": "code", "size": 40000, "mtime": "2003-02-14T10:20:00Z" }
+        ]
+      },
+      {
+        "compression": "lzx",
+        "compressionMemory": 17,
+        "files": [
+          { "name": "window17/random.bin", "type": "random", "size": 32768, "mtime": "2000-06-15T08:30:00Z" },
+          { "name": "window17/text.txt", "type": "text", "size": 40000, "mtime": "2001-03-20T14:45:16Z" },
+          { "name": "window17/code.bin", "type": "code", "size": 40000, "mtime": "2003-02-14T10:20:00Z" }
+        ]
+      },
+      {
+        "compression": "lzx",
+        "compressionMemory": 18,
+        "files": [
+          { "name": "window18/random.bin", "type": "random", "size": 32768, "mtime": "2000-06-15T08:30:00Z" },
+          { "name": "window18/text.txt", "type": "text", "size": 40000, "mtime": "2001-03-20T14:45:16Z" },
+          { "name": "window18/code.bin", "type": "code", "size": 40000, "mtime": "2003-02-14T10:20:00Z" }
+        ]
+      },
+      {
+        "compression": "lzx",
+        "compressionMemory": 19,
+        "files": [
+          { "name": "window19/random.bin", "type": "random", "size": 32768, "mtime": "2000-06-15T08:30:00Z" },
+          { "name": "window19/text.txt", "type": "text", "size": 40000, "mtime": "2001-03-20T14:45:16Z" },
+          { "name": "window19/code.bin", "type": "code", "size": 40000, "mtime": "2003-02-14T10:20:00Z" }
+        ]
+      },
+      {
+        "compression": "lzx",
+        "compressionMemory": 20,
+        "files": [
+          { "name": "window20/random.bin", "type": "random", "size": 32768, "mtime": "2000-06-15T08:30:00Z" },
+          { "name": "window20/text.txt", "type": "text", "size": 40000, "mtime": "2001-03-20T14:45:16Z" },
+          { "name": "window20/code.bin", "type": "code", "size": 40000, "mtime": "2003-02-14T10:20:00Z" }
+        ]
+      },
+      {
+        "compression": "lzx",
+        "compressionMemory": 21,
+        "files": [
+          { "name": "window21/random.bin", "type": "random", "size": 32768, "mtime": "2000-06-15T08:30:00Z" },
+          { "name": "window21/text.txt", "type": "text", "size": 40000, "mtime": "2001-03-20T14:45:16Z" },
+          { "name": "window21/code.bin", "type": "code", "size": 40000, "mtime": "2003-02-14T10:20:00Z" }
+        ]
+      }
+    ]
+  },
+  {
     "name": "mixed_compression",
     "folders": [
       {
@@ -47,6 +115,10 @@
       {
         "compression": "none",
         "files": [{ "name": "plain.txt", "type": "text", "size": 128, "mtime": "2010-05-10T12:00:00Z" }]
+      },
+      {
+        "compression": "lzx",
+        "files": [{ "name": "lzx.txt", "type": "text", "size": 384, "mtime": "2012-11-11T11:11:10Z" }]
       }
     ]
   },
@@ -74,6 +146,10 @@
       {
         "compression": "mszip",
         "files": [{ "name": "compressed.txt", "type": "text", "size": 0, "mtime": "1980-01-01T00:00:00Z" }]
+      },
+      {
+        "compression": "lzx",
+        "files": [{ "name": "lzx.txt", "type": "text", "size": 0, "mtime": "1980-01-01T00:00:00Z" }]
       }
     ]
   },
