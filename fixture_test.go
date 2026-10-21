@@ -68,7 +68,7 @@ func loadAllCabTests(t *testing.T) []CabTest {
 			case "none":
 				folder.Comp = cabinet.None
 			case "mszip":
-				folder.Comp = cabinet.MSZip
+				folder.Comp = cabinet.MSZIP
 			case "lzx":
 				folder.Comp = cabinet.LZX
 			case "quantum":

@@ -44,7 +44,7 @@ type Compression uint16
 // Compression methods supported by the Cabinet format.
 const (
 	None    Compression = 0 // no compression
-	MSZip   Compression = 1 // MS-ZIP compression
+	MSZIP   Compression = 1 // MSZIP compression
 	Quantum Compression = 2 // Quantum compression; requires a third-party decompressor
 	LZX     Compression = 3 // LZX compression; requires a third-party decompressor
 )
@@ -54,8 +54,8 @@ func (c Compression) String() string {
 	switch c {
 	case None:
 		return "None"
-	case MSZip:
-		return "MS-ZIP"
+	case MSZIP:
+		return "MSZIP"
 	case Quantum:
 		return "Quantum"
 	case LZX:
@@ -83,13 +83,13 @@ type Decompressor func(r io.Reader) io.ReadCloser
 var compressors, decompressors sync.Map
 
 // RegisterCompressor registers a custom compressor for the given method.
-// The built-in methods [None] and [MSZip] are registered by default.
+// The built-in methods [None] and [MSZIP] are registered by default.
 func RegisterCompressor(method Compression, comp Compressor) {
 	compressors.Store(method, comp)
 }
 
 // RegisterDecompressor registers a custom decompressor for the given method.
-// The built-in methods [None] and [MSZip] are registered by default.
+// The built-in methods [None] and [MSZIP] are registered by default.
 func RegisterDecompressor(method Compression, dcomp Decompressor) {
 	decompressors.Store(method, dcomp)
 }
@@ -117,11 +117,11 @@ func init() {
 	})
 	RegisterDecompressor(None, io.NopCloser)
 
-	// MS-ZIP.
-	RegisterCompressor(MSZip, func(w io.Writer) (io.WriteCloser, error) {
+	// MSZIP.
+	RegisterCompressor(MSZIP, func(w io.Writer) (io.WriteCloser, error) {
 		return mszip.NewWriter(w, mszip.DefaultCompression)
 	})
-	RegisterDecompressor(MSZip, func(r io.Reader) io.ReadCloser {
+	RegisterDecompressor(MSZIP, func(r io.Reader) io.ReadCloser {
 		return mszip.NewReader(r)
 	})
 }

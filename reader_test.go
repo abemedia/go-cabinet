@@ -16,7 +16,6 @@ import (
 func TestFS(t *testing.T) {
 	var buf seekBuffer
 	w := cabinet.NewWriter(&buf)
-	w.SetCompression(cabinet.MSZip)
 
 	fsys := fstest.MapFS{
 		"a.txt":       &fstest.MapFile{Data: []byte("root file")},
@@ -51,7 +50,6 @@ func TestOutOfOrder(t *testing.T) {
 
 	var buf seekBuffer
 	w := cabinet.NewWriter(&buf)
-	w.SetCompression(cabinet.MSZip)
 	for i, d := range data {
 		name := strings.Repeat("x", i) + ".txt"
 		wr, err := w.Create(name)
@@ -109,7 +107,6 @@ func TestChecksum(t *testing.T) {
 
 	var buf seekBuffer
 	w := cabinet.NewWriter(&buf)
-	w.SetCompression(cabinet.MSZip)
 	wr, _ := w.Create("test.txt")
 	if _, err := wr.Write(bytes.Repeat([]byte("checksum test data "), 200)); err != nil {
 		t.Fatal(err)
