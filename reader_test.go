@@ -171,6 +171,7 @@ func TestReaderErrors(t *testing.T) {
 	}{
 		// The first CFFOLDER entry follows the 36-byte header, with the compression type at offset 6.
 		{"unknown compression type", 42, 5, cabinet.ErrAlgorithm},
+		{"invalid LZX window", 42, uint16(cabinet.LZXWindow(14)), cabinet.ErrFormat},
 		// The CFFOLDER entry starts with the offset of its first CFDATA block, whose uncompressed size is at offset 6.
 		{"block size mismatch", int(binary.LittleEndian.Uint32(src[36:])) + 6, 3, cabinet.ErrFormat},
 	}

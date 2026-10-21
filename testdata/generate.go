@@ -12,6 +12,7 @@ package main
 import (
 	"bytes"
 	"cmp"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -35,8 +36,9 @@ type FileSpec struct {
 }
 
 type Folder struct {
-	Compression string     `json:"compression"`
-	Files       []FileSpec `json:"files"`
+	Compression       string     `json:"compression"`
+	CompressionMemory int        `json:"compressionMemory"`
+	Files             []FileSpec `json:"files"`
 }
 
 // Options sets per-cabinet makecab DDF directives. Zero values are omitted.
@@ -180,6 +182,8 @@ func generateContent(fixtureName, fileName, typ string, size int) ([]byte, error
 	switch typ {
 	case "text":
 		return generateText(rng, size), nil
+	case "code":
+		return generateCode(rng, size), nil
 	case "random":
 		return generateRandom(rng, size), nil
 	default:
@@ -229,6 +233,61 @@ func generateText(rng *rand.Rand, size int) []byte {
 	return buf[:size]
 }
 
+// generateCode returns data resembling x86 machine code, with functions aligned
+// to 16 bytes that call a small set of addresses, and tables of 16-byte records.
+// The calls trigger LZX's E8 translation.
+func generateCode(rng *rand.Rand, size int) []byte {
+	instructions := [][]byte{
+		{0x90},
+		{0x31, 0xC0},
+		{0x85, 0xC0},
+		{0x74, 0x0C},
+		{0x75, 0xF2},
+		{0x8B, 0x45, 0xFC},
+		{0x89, 0x45, 0xFC},
+		{0x0F, 0xB6, 0x00},
+		{0x48, 0x89, 0xC7},
+		{0x48, 0x8B, 0x45, 0xF8},
+		{0x48, 0x89, 0x45, 0xF0},
+		{0x48, 0x8D, 0x4D, 0xE0},
+	}
+	prologue := []byte{0x55, 0x48, 0x89, 0xE5, 0x48, 0x83, 0xEC, 0x20}
+	epilogue := []byte{0x48, 0x83, 0xC4, 0x20, 0x5D, 0xC3}
+	targets := make([]int, 64)
+	for i := range targets {
+		targets[i] = rng.IntN(size) &^ 15
+	}
+
+	buf := make([]byte, 0, size+4096)
+	for len(buf) < size {
+		if rng.IntN(16) == 0 {
+			base := uint32(rng.IntN(size))
+			for i := range uint32(8 + rng.IntN(56)) {
+				buf = binary.LittleEndian.AppendUint32(buf, base+24*i)
+				buf = binary.LittleEndian.AppendUint32(buf, 0)
+				buf = binary.LittleEndian.AppendUint16(buf, uint16(i))
+				buf = append(buf, 0, 0, 0x40, 0, 0, 0)
+			}
+			continue
+		}
+		buf = append(buf, prologue...)
+		for range 4 + rng.IntN(60) {
+			if rng.IntN(6) == 0 {
+				target := targets[rng.IntN(len(targets))]
+				buf = append(buf, 0xE8)
+				buf = binary.LittleEndian.AppendUint32(buf, uint32(target-len(buf)-4))
+				continue
+			}
+			buf = append(buf, instructions[rng.IntN(len(instructions))]...)
+		}
+		buf = append(buf, epilogue...)
+		for len(buf)%16 != 0 {
+			buf = append(buf, 0xCC)
+		}
+	}
+	return buf[:size]
+}
+
 // writeDDF writes a makecab Directive Definition File.
 func writeDDF(ddfPath, cabPath, srcDir string, fix Fixture) error {
 	const ddfTmpl = `.OPTION EXPLICIT
@@ -240,7 +299,8 @@ func writeDDF(ddfPath, cabPath, srcDir string, fix Fixture) error {
 {{end}}{{if .ReservePerDataBlock}}.Set ReservePerDataBlockSize={{.ReservePerDataBlock}}
 {{end}}{{range $i, $e := .Entries}}{{if gt $i 0}}.New Folder
 {{end}}.Set Compress={{if eq $e.Comp "NONE"}}off{{else}}on
-.Set CompressionType={{$e.Comp}}{{end}}
+.Set CompressionType={{$e.Comp}}{{end}}{{if $e.Memory}}
+.Set CompressionMemory={{$e.Memory}}{{end}}
 {{range $e.Files}}.Set DestinationDir="{{.Dir}}"
 "{{.Src}}" "{{.Base}}" /attr={{.Attr}}
 {{end}}{{end}}`
@@ -252,8 +312,9 @@ func writeDDF(ddfPath, cabPath, srcDir string, fix Fixture) error {
 		Attr string
 	}
 	type folderEntry struct {
-		Comp  string
-		Files []fileEntry
+		Comp   string
+		Memory int
+		Files  []fileEntry
 	}
 	type data struct {
 		CabPath             string
@@ -279,9 +340,14 @@ func writeDDF(ddfPath, cabPath, srcDir string, fix Fixture) error {
 				Attr: strings.ToUpper(f.Attrs),
 			})
 		}
+		memory := folder.CompressionMemory
+		if strings.EqualFold(folder.Compression, "lzx") {
+			memory = cmp.Or(memory, 21)
+		}
 		entries = append(entries, folderEntry{
-			Comp:  strings.ToUpper(folder.Compression),
-			Files: files,
+			Comp:   strings.ToUpper(folder.Compression),
+			Memory: memory,
+			Files:  files,
 		})
 	}
 
