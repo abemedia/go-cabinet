@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/abemedia/go-cabinet/lzx"
 	"github.com/abemedia/go-cabinet/mszip"
 )
 
@@ -45,7 +46,7 @@ const (
 	None    Compression = 0 // no compression
 	MSZIP   Compression = 1 // MSZIP compression
 	Quantum Compression = 2 // Quantum compression; requires a third-party decompressor
-	LZX     Compression = 3 // LZX compression; requires a third-party decompressor
+	LZX     Compression = 3 // LZX compression; Writer defaults to LZXWindow(21)
 )
 
 // LZXWindow returns LZX compression with a sliding window of 2^window bytes,
@@ -172,7 +173,7 @@ type Decompressor func(level, memory int) (Decoder, error)
 var compressors, decompressors sync.Map
 
 // RegisterCompressor registers a custom compressor for the given method.
-// The built-in methods [None] and [MSZIP] are registered by default.
+// The built-in methods [None], [MSZIP] and [LZX] are registered by default.
 func RegisterCompressor(method Compression, comp Compressor) {
 	if comp == nil {
 		panic("cabinet: RegisterCompressor with nil compressor")
@@ -181,7 +182,7 @@ func RegisterCompressor(method Compression, comp Compressor) {
 }
 
 // RegisterDecompressor registers a custom decompressor for the given method.
-// The built-in methods [None] and [MSZIP] are registered by default.
+// The built-in methods [None], [MSZIP] and [LZX] are registered by default.
 func RegisterDecompressor(method Compression, dcomp Decompressor) {
 	if dcomp == nil {
 		panic("cabinet: RegisterDecompressor with nil decompressor")
@@ -197,6 +198,10 @@ func init() {
 	// MSZIP.
 	RegisterCompressor(MSZIP, func(int, int) (Encoder, error) { return mszip.NewEncoder(mszip.DefaultCompression) })
 	RegisterDecompressor(MSZIP, func(int, int) (Decoder, error) { return mszip.NewDecoder(), nil })
+
+	// LZX.
+	RegisterCompressor(LZX, func(_, memory int) (Encoder, error) { return lzx.NewEncoder(memory) })
+	RegisterDecompressor(LZX, func(_, memory int) (Decoder, error) { return lzx.NewDecoder(memory) })
 }
 
 // store is the codec of folders that are not compressed.
