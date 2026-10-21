@@ -2,7 +2,6 @@ package cabinet
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -36,30 +35,52 @@ type Writer struct {
 
 // NewWriter returns a new [Writer] writing to w.
 func NewWriter(w io.WriteSeeker) *Writer {
-	return &Writer{
-		w:           w,
-		compressors: map[Compression]Compressor{},
-		current:     &folderEntry{method: MSZIP},
-	}
+	return &Writer{w: w, current: &folderEntry{comp: MSZIP}}
 }
 
 // RegisterCompressor registers or overrides a compressor for the given method.
 // If a compressor for a given method is not found, [Writer] will default to
 // looking up the compressor at the package level.
 func (w *Writer) RegisterCompressor(method Compression, comp Compressor) {
-	w.compressors[method] = comp
+	if w.compressors == nil {
+		w.compressors = map[Compression]Compressor{}
+	}
+	w.compressors[method.Type()] = comp
+}
+
+// compressor returns the compressor for method, falling back to the package-level registry.
+func (w *Writer) compressor(method Compression) Compressor {
+	typ := method.Type()
+	if c := w.compressors[typ]; c != nil {
+		return c
+	}
+	if v, ok := compressors.Load(typ); ok {
+		return v.(Compressor)
+	}
+	return nil
 }
 
 // SetCompression sets the compression method for subsequently added files.
 // If the current folder already contains files, it starts a new folder.
-func (w *Writer) SetCompression(c Compression) {
-	if c == w.current.method {
-		return
+// It returns an error if c is not a valid compression type or has no registered compressor.
+func (w *Writer) SetCompression(c Compression) error {
+	if w.closed {
+		return errClosed
+	}
+	if c == w.current.comp {
+		return nil
+	}
+	if err := c.validate(); err != nil {
+		return err
+	}
+	if w.compressor(c) == nil {
+		return ErrAlgorithm
 	}
 	if len(w.current.files) > 0 {
 		w.FlushFolder()
 	}
-	w.current.method = c
+	w.current.comp = c
+	return nil
 }
 
 // FlushFolder starts a new folder. It is a no-op if the current folder is empty.
@@ -68,7 +89,7 @@ func (w *Writer) FlushFolder() {
 		return
 	}
 	w.folders = append(w.folders, w.current)
-	w.current = &folderEntry{method: w.current.method}
+	w.current = &folderEntry{comp: w.current.comp}
 }
 
 // Create adds a file to the archive with the given name and returns an
@@ -232,11 +253,6 @@ func (w *Writer) Close() error {
 		return fmt.Errorf("cabinet: too many files (%d, max %d)", totalFiles, math.MaxUint16)
 	}
 
-	compFuncs, err := w.resolveCompressors(finalFolders)
-	if err != nil {
-		return err
-	}
-
 	dataOffset := int64(cfHeaderSize + len(finalFolders)*cfFolderSize)
 	for _, ff := range finalFolders {
 		for _, f := range ff.files {
@@ -247,25 +263,48 @@ func (w *Writer) Close() error {
 		return err
 	}
 
-	written := dataOffset
-	for fi, ff := range finalFolders {
-		ff.coffCabStart = uint32(written)
-		cCFData, n, err := w.compressFolder(ff.files, compFuncs[fi])
-		if err != nil {
-			return err
-		}
-		written += n
-		if written > math.MaxUint32 {
-			return errors.New("cabinet: archive exceeds 4 GiB limit")
-		}
-		ff.cCFData = cCFData
-		finalFolders[fi] = ff
+	cbCabinet, err := w.compressFolders(finalFolders, dataOffset)
+	if err != nil {
+		return err
 	}
 
 	if _, err := w.w.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	return w.writeHeaders(finalFolders, uint32(written))
+	return w.writeHeaders(finalFolders, cbCabinet)
+}
+
+// compressFolders writes the CFDATA blocks of all folders to w.w, starting at
+// the given offset, and returns the offset of the end of the cabinet.
+func (w *Writer) compressFolders(folders []*folderEntry, offset int64) (uint32, error) {
+	encoders := map[Compression]Encoder{}
+	for _, ff := range folders {
+		enc, ok := encoders[ff.comp]
+		if ok {
+			enc.Reset()
+		} else {
+			comp := w.compressor(ff.comp)
+			if comp == nil {
+				return 0, ErrAlgorithm
+			}
+			var err error
+			if enc, err = comp(ff.comp.Level(), ff.comp.Memory()); err != nil {
+				return 0, fmt.Errorf("cabinet: create compressor: %w", err)
+			}
+			encoders[ff.comp] = enc
+		}
+
+		ff.coffCabStart = uint32(offset)
+		n, err := w.compressFolder(ff, enc)
+		if err != nil {
+			return 0, err
+		}
+		offset += n
+		if offset > math.MaxUint32 {
+			return 0, errors.New("cabinet: archive exceeds 4 GiB limit")
+		}
+	}
+	return uint32(offset), nil
 }
 
 // closeStagedFile finalises the currently open staged file write, recording its size.
@@ -301,7 +340,7 @@ func (w *Writer) planFolders() []*folderEntry {
 		var offset uint32
 		for i, f := range fe.files {
 			if i > start && uint64(offset)+uint64(f.size) > autoSplitThreshold {
-				final = append(final, &folderEntry{method: fe.method, files: fe.files[start:i]})
+				final = append(final, &folderEntry{comp: fe.comp, files: fe.files[start:i]})
 				start = i
 				offset = 0
 			}
@@ -310,7 +349,7 @@ func (w *Writer) planFolders() []*folderEntry {
 			offset += f.size
 		}
 		if start < len(fe.files) {
-			final = append(final, &folderEntry{method: fe.method, files: fe.files[start:]})
+			final = append(final, &folderEntry{comp: fe.comp, files: fe.files[start:]})
 		}
 	}
 	return final
@@ -350,7 +389,7 @@ func (w *Writer) writeHeaders(folders []*folderEntry, cbCabinet uint32) error {
 		if err := writeCFFolder(bw, cfFolderRecord{
 			CoffCabStart: ff.coffCabStart,
 			CCFData:      ff.cCFData,
-			TypeCompress: ff.method,
+			TypeCompress: ff.comp,
 		}); err != nil {
 			return err
 		}
@@ -374,81 +413,37 @@ func (w *Writer) writeHeaders(folders []*folderEntry, cbCabinet uint32) error {
 	return bw.Flush()
 }
 
-// resolveCompressors looks up a compressor for each folder, returning an error
-// if any method is unregistered.
-func (w *Writer) resolveCompressors(folders []*folderEntry) ([]Compressor, error) {
-	comps := make([]Compressor, len(folders))
-	for i, ff := range folders {
-		c := w.compressors[ff.method]
-		if c == nil {
-			c = compressor(ff.method)
-		}
-		if c == nil {
-			return nil, fmt.Errorf("%w for method %s", ErrAlgorithm, ff.method)
-		}
-		comps[i] = c
-	}
-	return comps, nil
-}
+// compressFolder compresses all data from the folder's files using enc, writing
+// CFDATA blocks to w.w. It records the number of blocks in ff and returns the
+// total bytes written.
+func (w *Writer) compressFolder(ff *folderEntry, enc Encoder) (written int64, err error) {
+	var in [blockSize]byte
+	var out []byte
 
-// compressFolder compresses all data from files using comp, writing CFDATA
-// blocks to w.w. Returns the number of blocks written and total bytes written.
-func (w *Writer) compressFolder(files []*fileEntry, comp Compressor) (cCFData uint16, written int64, err error) {
-	var inputBuf [32768]byte
-	var compBuf bytes.Buffer
-
-	src := &seqFileReader{files: files}
+	src := &seqFileReader{files: ff.files}
 	defer src.close()
 
-	fw, err := comp(&compBuf)
-	if err != nil {
-		return 0, 0, fmt.Errorf("cabinet: create compressor: %w", err)
-	}
-	flusher, hasFlusher := fw.(interface{ Flush() error })
-
 	for {
-		n, rerr := io.ReadFull(src, inputBuf[:])
-		if n > 0 { //nolint:nestif
-			compBuf.Reset()
-			if _, werr := fw.Write(inputBuf[:n]); werr != nil {
-				return 0, 0, fmt.Errorf("cabinet: compress: %w", werr)
+		n, rerr := io.ReadFull(src, in[:])
+		if n > 0 {
+			if out, err = enc.Encode(out[:0], in[:n]); err != nil {
+				return 0, fmt.Errorf("cabinet: compress: %w", err)
 			}
-			if hasFlusher {
-				if ferr := flusher.Flush(); ferr != nil {
-					return 0, 0, fmt.Errorf("cabinet: flush compressor: %w", ferr)
-				}
+			nw, err := writeCFDataBlock(w.w, out, uint16(n))
+			if err != nil {
+				return 0, err
 			}
-			if compBuf.Len() > 0 {
-				n, err := writeCFDataBlock(w.w, compBuf.Bytes(), uint16(n))
-				if err != nil {
-					return 0, 0, err
-				}
-				written += n
-				cCFData++
-			}
+			written += nw
+			ff.cCFData++
 		}
 		if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
 			break
 		}
 		if rerr != nil {
-			return 0, 0, fmt.Errorf("cabinet: read source: %w", rerr)
+			return 0, fmt.Errorf("cabinet: read source: %w", rerr)
 		}
 	}
-
-	// Finalize the compressor; emit any trailing output.
-	compBuf.Reset()
-	if err := fw.Close(); err != nil {
-		return 0, 0, fmt.Errorf("cabinet: close compressor: %w", err)
-	}
-	if compBuf.Len() > 0 {
-		n, err := writeCFDataBlock(w.w, compBuf.Bytes(), 0)
-		if err != nil {
-			return 0, 0, err
-		}
-		written += n
-		cCFData++
-	}
-	return cCFData, written, nil
+	return written, nil
 }
 
 // isNonUTF8 returns true if the file name should be marked as not UTF-8 encoded in the Cabinet format.
@@ -500,8 +495,8 @@ func (s *seqFileReader) close() {
 
 // folderEntry represents a CFFOLDER group.
 type folderEntry struct {
-	method Compression
-	files  []*fileEntry
+	comp  Compression
+	files []*fileEntry
 
 	// Assigned during Close():
 	coffCabStart uint32

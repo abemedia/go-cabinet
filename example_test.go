@@ -89,8 +89,8 @@ func ExampleWriter_RegisterCompressor() {
 	w := cabinet.NewWriter(f)
 
 	// Register a custom MSZIP compressor.
-	w.RegisterCompressor(cabinet.MSZIP, func(out io.Writer) (io.WriteCloser, error) {
-		return mszip.NewWriter(out, mszip.BestCompression)
+	w.RegisterCompressor(cabinet.MSZIP, func(int, int) (cabinet.Encoder, error) {
+		return mszip.NewEncoder(mszip.BestCompression)
 	})
 
 	// Proceed to add files to w.

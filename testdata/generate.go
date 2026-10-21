@@ -130,7 +130,10 @@ func generateFixture(testdataDir string, fix Fixture) error {
 			}
 			content := []byte(f.Content)
 			if len(content) == 0 {
-				content = generateContent(fix.Name, f.Name, f.Type, f.Size)
+				var err error
+				if content, err = generateContent(fix.Name, f.Name, f.Type, f.Size); err != nil {
+					return err
+				}
 			}
 			if err := os.WriteFile(path, content, perm); err != nil {
 				return err
@@ -166,26 +169,64 @@ func generateFixture(testdataDir string, fix Fixture) error {
 // generateContent returns deterministic pseudo-random content for a fixture file.
 // The output is fully determined by fixtureName+fileName so re-running the generator
 // produces identical source files and identical .cab outputs.
-// "text" uses printable ASCII, "binary" uses raw bytes.
-func generateContent(fixtureName, fileName, typ string, size int) []byte {
+func generateContent(fixtureName, fileName, typ string, size int) ([]byte, error) {
 	if size == 0 {
-		return []byte{}
+		return []byte{}, nil
 	}
 	h := fnv.New64a()
 	h.Write([]byte(fixtureName + "/" + fileName))
 	rng := rand.New(rand.NewPCG(h.Sum64(), 0))
 
+	switch typ {
+	case "text":
+		return generateText(rng, size), nil
+	case "random":
+		return generateRandom(rng, size), nil
+	default:
+		return nil, fmt.Errorf("unknown file type %q", typ)
+	}
+}
+
+// generateRandom returns random bytes, which do not compress.
+func generateRandom(rng *rand.Rand, size int) []byte {
 	buf := make([]byte, size)
 	for i := range buf {
 		buf[i] = byte(rng.IntN(256))
 	}
-	if typ == "text" {
-		const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \n"
-		for i, b := range buf {
-			buf[i] = charset[int(b)%len(charset)]
+	return buf
+}
+
+var words = strings.Fields(`the of and to in is that it was for on are as with his they at be this from
+have or by one had not but what all were when we there can an your which their said if do will each
+about how up out them then she many some so these would other into has more her two like him see time
+could no make than first been its who now people my made over did down only way find use may water
+long little very after words called just where most know`)
+
+// generateText returns prose built from a small vocabulary. Now and then it
+// repeats a passage from anywhere earlier in the text, so that matches occur
+// at long distances as well as short ones.
+func generateText(rng *rand.Rand, size int) []byte {
+	buf := make([]byte, 0, size+1024)
+	for len(buf) < size {
+		if len(buf) > 0 && rng.IntN(400) == 0 {
+			start := rng.IntN(len(buf))
+			start += bytes.IndexAny(buf[start:], " \n") + 1
+			end := min(start+64+rng.IntN(960), len(buf))
+			end += bytes.IndexAny(buf[end-1:], " \n")
+			buf = append(buf, buf[start:end]...)
+			continue
+		}
+		buf = append(buf, words[int(rng.ExpFloat64()*12)%len(words)]...)
+		switch rng.IntN(16) {
+		case 0:
+			buf = append(buf, ".\n"...)
+		case 1:
+			buf = append(buf, ", "...)
+		default:
+			buf = append(buf, ' ')
 		}
 	}
-	return buf
+	return buf[:size]
 }
 
 // writeDDF writes a makecab Directive Definition File.

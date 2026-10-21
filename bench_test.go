@@ -38,7 +38,9 @@ func BenchmarkWriter(b *testing.B) {
 				for b.Loop() {
 					out = discardSeeker{}
 					w := cabinet.NewWriter(&out)
-					w.SetCompression(method)
+					if err := w.SetCompression(method); err != nil {
+						b.Fatalf("SetCompression: %v", err)
+					}
 					if err := w.AddFS(fstest.MapFS{file.name: {Data: data}}); err != nil {
 						b.Fatalf("AddFS: %v", err)
 					}
@@ -59,7 +61,9 @@ func BenchmarkReader(b *testing.B) {
 			b.Run(method.String()+"/"+file.name, func(b *testing.B) {
 				var buf seekBuffer
 				w := cabinet.NewWriter(&buf)
-				w.SetCompression(method)
+				if err := w.SetCompression(method); err != nil {
+					b.Fatalf("SetCompression: %v", err)
+				}
 				if err := w.AddFS(fstest.MapFS{file.name: {Data: data}}); err != nil {
 					b.Fatalf("AddFS: %v", err)
 				}
