@@ -64,7 +64,7 @@ func TestRoundTrip(t *testing.T) {
 		},
 		{
 			name:        "mszip",
-			compression: cabinet.MSZip,
+			compression: cabinet.MSZIP,
 			files: []file{
 				{"f1.txt", bytes.Repeat([]byte("hello compressed world "), 500)},
 				{"f2.txt", bytes.Repeat([]byte("second file content "), 200)},

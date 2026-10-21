@@ -111,7 +111,7 @@ See the [package documentation](https://pkg.go.dev/github.com/abemedia/go-cabine
 ## Supported Compression Algorithms
 
 - **None** (e.g. uncompressed)
-- **MS-Zip** (default)
+- **MSZIP** (default)
 
 The LZX and Quantum compression methods are not yet implemented, however custom compressors/decompressors can be registered via `RegisterCompressor` / `RegisterDecompressor`.
 

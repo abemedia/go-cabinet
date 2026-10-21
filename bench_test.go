@@ -24,7 +24,7 @@ var benchFiles = []struct{ name, sum string }{
 	{"dickens", "b24c37886142e11d0ee687db6ab06f936207aa7f2ea1fd1d9a36763c7a507e6a"}, // English text
 }
 
-var benchMethods = []cabinet.Compression{cabinet.None, cabinet.MSZip}
+var benchMethods = []cabinet.Compression{cabinet.None, cabinet.MSZIP}
 
 func BenchmarkWriter(b *testing.B) {
 	for _, file := range benchFiles {

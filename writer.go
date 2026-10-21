@@ -39,7 +39,7 @@ func NewWriter(w io.WriteSeeker) *Writer {
 	return &Writer{
 		w:           w,
 		compressors: map[Compression]Compressor{},
-		current:     &folderEntry{method: MSZip},
+		current:     &folderEntry{method: MSZIP},
 	}
 }
 
