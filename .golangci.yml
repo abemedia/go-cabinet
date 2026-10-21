@@ -47,6 +47,7 @@ linters:
           - gocognit
           - goconst
           - gocritic
+          - lll
         path: (.+)_test.go
       - linters: [govet]
         text: 'shadow: declaration of "err" shadows declaration'
@@ -57,20 +58,10 @@ linters:
 
 formatters:
   enable:
-    - gofmt
     - gofumpt
-    - goimports
-    - golines
   settings:
-    gofmt:
-      rewrite-rules:
-        - pattern: interface{}
-          replacement: any
     gofumpt:
       extra:
         group-params: true
         clothe-returns: true
         balance-calls: true
-    golines:
-      max-len: 120
-      tab-len: 2
