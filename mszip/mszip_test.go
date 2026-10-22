@@ -3,153 +3,175 @@ package mszip_test
 import (
 	"bytes"
 	"io"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/abemedia/go-cabinet/mszip"
 )
 
+const blockSize = 1 << 15
+
 // TestRoundTrip verifies basic compress/decompress with CK prefix.
 func TestRoundTrip(t *testing.T) {
-	data := bytes.Repeat([]byte("hello world this is a test of ms-zip compression "), 50)
-
-	var buf bytes.Buffer
-	w, err := mszip.NewWriter(&buf, mszip.DefaultCompression)
-	if err != nil {
-		t.Fatal(err)
+	pattern := []byte("abcdefghijklmnopqrstuvwxyz0123456789")
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"short", bytes.Repeat([]byte("hello world this is a test of mszip compression "), 50)},
+		{"one byte", []byte{'a'}},
+		{"block", bytes.Repeat(pattern, blockSize/len(pattern)+1)[:blockSize]},
+		{"multiple blocks", bytes.Repeat(pattern, (3*blockSize+100)/len(pattern)+1)[:3*blockSize+100]},
+		{"random", random(3*blockSize + 100)},
 	}
-	if _, err := w.Write(data); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	// Verify CK signature at start.
-	if !bytes.HasPrefix(buf.Bytes(), []byte("CK")) {
-		t.Fatalf("expected CK prefix, got %v", buf.Bytes()[:2])
-	}
-
-	r := mszip.NewReader(&buf)
-	got, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-	if err := r.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	levels := []int{
+		mszip.NoCompression,
+		mszip.BestSpeed,
+		mszip.BestCompression,
+		mszip.DefaultCompression,
+		mszip.HuffmanOnly,
 	}
 
-	if !bytes.Equal(got, data) {
-		t.Errorf("round-trip mismatch: got %d bytes, want %d bytes", len(got), len(data))
-	}
-}
-
-// TestMultiBlock verifies cross-block dictionary seeding with input > 32KB.
-func TestMultiBlock(t *testing.T) {
-	// 100KB of repetitive text (compressible, exercises dictionary seeding).
-	base := bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz0123456789"), 2860)
-	data := base[:100*1024]
-
-	var buf bytes.Buffer
-	w, err := mszip.NewWriter(&buf, mszip.DefaultCompression)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.Write(data); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	// Count CK prefixes to verify multiple blocks were emitted.
-	// With 100KB input we expect at least 3 full blocks (3*32768 = 98304).
-	count := bytes.Count(buf.Bytes(), []byte("CK"))
-	if count < 3 {
-		t.Errorf("expected at least 3 CK-prefixed blocks, found %d", count)
-	}
-
-	r := mszip.NewReader(&buf)
-	got, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-	if err := r.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	if !bytes.Equal(got, data) {
-		t.Errorf("round-trip mismatch: got %d bytes, want %d bytes", len(got), len(data))
-	}
-}
-
-// TestArbitraryWriteSizes verifies that many small writes produce the same
-// compressed output as a single large write.
-func TestArbitraryWriteSizes(t *testing.T) {
-	data := bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz"), 2100) // ~54KB
-
-	// Single large write.
-	var buf1 bytes.Buffer
-	w1, err := mszip.NewWriter(&buf1, mszip.DefaultCompression)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w1.Write(data); err != nil {
-		t.Fatalf("single write: %v", err)
-	}
-	if err := w1.Close(); err != nil {
-		t.Fatalf("single close: %v", err)
-	}
-
-	// Many small writes (1-byte, 7-byte, 1000-byte pattern).
-	var buf2 bytes.Buffer
-	w2, err := mszip.NewWriter(&buf2, mszip.DefaultCompression)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rest := data
-	sizes := []int{1, 7, 1000}
-	for si := 0; len(rest) > 0; si++ {
-		n := min(sizes[si%len(sizes)], len(rest))
-		if _, err := w2.Write(rest[:n]); err != nil {
-			t.Fatalf("small write: %v", err)
+	for _, test := range tests {
+		for _, level := range levels {
+			blocks := encode(t, test.data, level)
+			for i, block := range blocks {
+				if !bytes.HasPrefix(block, []byte("CK")) {
+					t.Fatalf("%s: block %d: expected CK prefix, got %v", test.name, i, block[:2])
+				}
+			}
+			got := decode(t, blocks, len(test.data))
+			if !bytes.Equal(got, test.data) {
+				t.Errorf("%s: round-trip mismatch at level %d: got %d bytes, want %d", test.name, level, len(got), len(test.data))
+			}
 		}
-		rest = rest[n:]
-	}
-	if err := w2.Close(); err != nil {
-		t.Fatalf("multi close: %v", err)
-	}
-
-	if !bytes.Equal(buf1.Bytes(), buf2.Bytes()) {
-		t.Errorf(
-			"compressed output differs between single write (%d bytes) and many small writes (%d bytes)",
-			buf1.Len(),
-			buf2.Len(),
-		)
 	}
 }
 
-// TestEmptyInput verifies that compressing and decompressing zero bytes works.
-func TestEmptyInput(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := mszip.NewWriter(&buf, mszip.DefaultCompression)
+// TestDictionary verifies that a block is compressed against the previous one.
+func TestDictionary(t *testing.T) {
+	block := random(blockSize)
+	rotated := append(block[1:len(block):len(block)], block[0])
+	blocks := encode(t, append(block, rotated...), mszip.DefaultCompression)
+	if len(blocks[0]) < blockSize {
+		t.Fatalf("random block compressed to %d bytes", len(blocks[0]))
+	}
+	if len(blocks[1]) > blockSize/10 {
+		t.Errorf("repeated block compressed to %d bytes, expected it to match the previous block", len(blocks[1]))
+	}
+}
+
+// TestReset verifies that an Encoder and a Decoder can be reused for a new stream.
+func TestReset(t *testing.T) {
+	data := bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz"), 2100)
+	want := encode(t, data, mszip.DefaultCompression)
+
+	e, err := mszip.NewEncoder(mszip.DefaultCompression)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	d := mszip.NewDecoder()
+	for range 2 {
+		e.Reset()
+		d.Reset()
+		for i, off := 0, 0; off < len(data); i, off = i+1, off+blockSize {
+			src := data[off:min(off+blockSize, len(data))]
+			block, err := e.Encode(nil, src)
+			if err != nil {
+				t.Fatalf("Encode: %v", err)
+			}
+			if !bytes.Equal(block, want[i]) {
+				t.Fatalf("block %d differs from a new encoder's", i)
+			}
+			got := make([]byte, len(src))
+			if _, err := d.Decode(got, block); err != nil {
+				t.Fatalf("Decode: %v", err)
+			}
+			if !bytes.Equal(got, src) {
+				t.Fatalf("block %d: round-trip mismatch", i)
+			}
+		}
 	}
+}
 
-	// No blocks should have been emitted for empty input.
-	if buf.Len() != 0 {
-		t.Errorf("expected empty output for empty input, got %d bytes", buf.Len())
+func TestEncoder_Errors(t *testing.T) {
+	if _, err := mszip.NewEncoder(10); err == nil || err.Error() != "mszip: invalid compression level: 10" {
+		t.Errorf("NewEncoder(10) = %v", err)
 	}
-
-	r := mszip.NewReader(&buf)
-	got, err := io.ReadAll(r)
+	e, err := mszip.NewEncoder(mszip.DefaultCompression)
 	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
+		t.Fatal(err)
 	}
-	if len(got) != 0 {
-		t.Errorf("expected empty decompressed output, got %d bytes", len(got))
+	for _, n := range []int{0, blockSize + 1} {
+		if _, err := e.Encode(nil, make([]byte, n)); err == nil || err.Error() != "mszip: invalid block size" {
+			t.Errorf("Encode of %d bytes = %v", n, err)
+		}
 	}
+}
+
+func TestDecoder_Errors(t *testing.T) {
+	data := []byte("hello world this is a test of mszip compression")
+	block := encode(t, data, mszip.DefaultCompression)[0]
+
+	tests := []struct {
+		name string
+		src  []byte
+		size int
+		want string
+	}{
+		{"missing signature", block[2:], len(data), "mszip: invalid block signature"},
+		{"empty", nil, len(data), "mszip: invalid block signature"},
+		{"truncated", block[:len(block)/2], len(data), io.ErrUnexpectedEOF.Error()},
+		{"size too small", block, len(data) - 1, "mszip: block does not match its uncompressed size"},
+		{"size too large", block, len(data) + 1, "mszip: block does not match its uncompressed size"},
+		{"size over a block", block, blockSize + 1, "mszip: invalid block size"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := mszip.NewDecoder().Decode(make([]byte, test.size), test.src); err == nil || err.Error() != test.want {
+				t.Errorf("Decode = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+// encode compresses data and returns its blocks.
+func encode(tb testing.TB, data []byte, level int) [][]byte {
+	tb.Helper()
+	e, err := mszip.NewEncoder(level)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	var blocks [][]byte
+	for off := 0; off < len(data); off += blockSize {
+		block, err := e.Encode(nil, data[off:min(off+blockSize, len(data))])
+		if err != nil {
+			tb.Fatalf("Encode: %v", err)
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks
+}
+
+// decode decompresses blocks that hold size bytes in total.
+func decode(tb testing.TB, blocks [][]byte, size int) []byte {
+	tb.Helper()
+	d := mszip.NewDecoder()
+	out := make([]byte, size)
+	for i, block := range blocks {
+		off := i * blockSize
+		if _, err := d.Decode(out[off:min(off+blockSize, size)], block); err != nil {
+			tb.Fatalf("Decode block %d: %v", i, err)
+		}
+	}
+	return out
+}
+
+func random(n int) []byte {
+	rng := rand.New(rand.NewPCG(1, 2))
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte(rng.Uint32())
+	}
+	return b
 }

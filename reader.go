@@ -77,10 +77,7 @@ func NewReader(r io.ReaderAt) (*Reader, error) {
 		return nil, err
 	}
 
-	rd := &Reader{
-		r:             r,
-		decompressors: map[Compression]Decompressor{},
-	}
+	rd := &Reader{r: r}
 	if err := rd.parseFolders(r, hdr, folderOff); err != nil {
 		return nil, err
 	}
@@ -132,7 +129,7 @@ func (rd *Reader) parseFolders(r io.ReaderAt, hdr cfHeader, off int64) error {
 			coffCabStart: rec.CoffCabStart,
 			cCFData:      rec.CCFData,
 			cbCFData:     hdr.CbCFData,
-			method:       rec.TypeCompress,
+			comp:         rec.TypeCompress,
 		}
 	}
 	return nil
@@ -170,7 +167,22 @@ func (rd *Reader) parseFiles(r io.ReaderAt, hdr cfHeader) error {
 // If a decompressor for a given method is not found, [Reader] will default to
 // looking up the decompressor at the package level.
 func (rd *Reader) RegisterDecompressor(method Compression, dcomp Decompressor) {
-	rd.decompressors[method] = dcomp
+	if rd.decompressors == nil {
+		rd.decompressors = map[Compression]Decompressor{}
+	}
+	rd.decompressors[method.Type()] = dcomp
+}
+
+// decompressor returns the decompressor for method, falling back to the package-level registry.
+func (rd *Reader) decompressor(method Compression) Decompressor {
+	typ := method.Type()
+	if d := rd.decompressors[typ]; d != nil {
+		return d
+	}
+	if v, ok := decompressors.Load(typ); ok {
+		return v.(Decompressor)
+	}
+	return nil
 }
 
 // Open opens the named file in the archive, using the semantics of [fs.FS.Open]:
@@ -205,14 +217,6 @@ func (rd *Reader) Open(name string) (fs.File, error) {
 	}
 }
 
-// decompressor returns the decompressor for method, falling back to the package-level registry.
-func (rd *Reader) decompressor(method Compression) Decompressor {
-	if d := rd.decompressors[method]; d != nil {
-		return d
-	}
-	return decompressor(method)
-}
-
 // A File is a single file in a Cabinet archive. The file information is in the
 // embedded [FileHeader]. The file content can be accessed by calling [File.Open].
 type File struct {
@@ -234,6 +238,15 @@ func (f *File) FolderIndex() uint16 { return f.iFolderIdx }
 // OffsetInFolder returns the uncompressed byte offset of the file within its folder.
 func (f *File) OffsetInFolder() uint32 { return f.uoffFolderStart }
 
+// Compression returns the compression type of the folder containing the file,
+// or zero if the folder is continued from or to another cabinet.
+func (f *File) Compression() Compression {
+	if int(f.iFolderIdx) >= len(f.r.folderStates) {
+		return 0
+	}
+	return f.r.folderStates[f.iFolderIdx].comp
+}
+
 // Open returns an [io.ReadCloser] that provides access to the file's contents.
 // Only one file within the same folder may be open at a time;
 // opening a second returns [ErrAlreadyOpen].
@@ -247,39 +260,33 @@ func (f *File) Open() (io.ReadCloser, error) {
 	if !folder.mu.TryLock() {
 		return nil, ErrAlreadyOpen
 	}
-	dcomp := f.r.decompressor(folder.method)
-	if dcomp == nil {
-		folder.mu.Unlock()
-		return nil, ErrAlgorithm
-	}
-	if err := folder.seekTo(dcomp, f.uoffFolderStart); err != nil {
+	if err := folder.seekTo(f.uoffFolderStart); err != nil {
 		folder.mu.Unlock()
 		return nil, err
 	}
-
-	return &fileReader{
-		lr:     io.LimitReader(folder.decomp, int64(f.cbFile)),
-		fs:     folder,
-		size:   f.cbFile,
-		target: f.uoffFolderStart + f.cbFile,
-	}, nil
+	return &fileReader{fs: folder, remaining: f.cbFile}, nil
 }
 
-// fileReader wraps a bounded read from a folder decompressor.
+// fileReader reads a file's data from its folder.
 // It holds the folder mutex for its entire lifetime.
 type fileReader struct {
-	lr     io.Reader
-	fs     *folderState
-	size   uint32
-	target uint32 // expected folder pos after full read
-	read   uint32
-	closed bool
+	fs        *folderState
+	remaining uint32
+	closed    bool
 }
 
 func (fr *fileReader) Read(p []byte) (int, error) {
-	n, err := fr.lr.Read(p)
-	fr.read += uint32(n)
-	fr.fs.pos += uint32(n)
+	if fr.closed {
+		return 0, fs.ErrClosed
+	}
+	if fr.remaining == 0 {
+		return 0, io.EOF
+	}
+	if int64(len(p)) > int64(fr.remaining) {
+		p = p[:fr.remaining]
+	}
+	n, err := fr.fs.read(p)
+	fr.remaining -= uint32(n)
 	return n, err
 }
 
@@ -288,14 +295,6 @@ func (fr *fileReader) Close() error {
 		return nil
 	}
 	fr.closed = true
-	if fr.read < fr.size {
-		// Partial read: invalidate the cache so next opener starts fresh.
-		if fr.fs.decomp != nil {
-			fr.fs.decomp.Close()
-			fr.fs.decomp = nil
-			fr.fs.pos = 0
-		}
-	}
 	fr.fs.mu.Unlock()
 	return nil
 }
@@ -309,86 +308,101 @@ type folderState struct {
 	coffCabStart uint32
 	cCFData      uint16
 	cbCFData     uint8
-	method       Compression
+	comp         Compression
 
-	// Mutable decompressor cache (protected by mu).
-	decomp io.ReadCloser
-	cfdr   cfDataReader
+	// Mutable decoding state (protected by mu).
+	dec    Decoder
+	off    int64  // offset of the next CFDATA block
+	blocks uint16 // CFDATA blocks left to read
+	in     []byte // buffer for the compressed data of a block
+	out    []byte // uncompressed data of the current block
+	outPos int    // read position within out
 	pos    uint32 // uncompressed bytes consumed so far
-}
-
-// resetCFDataReader reinitialises cfdr to read from the start of this folder's CFDATA blocks.
-func (fs *folderState) resetCFDataReader() {
-	fs.cfdr.reader = fs.reader
-	fs.cfdr.off = int64(fs.coffCabStart)
-	fs.cfdr.cbCFData = fs.cbCFData
-	fs.cfdr.remaining = fs.cCFData
-	fs.cfdr.bufPos = 0
-	if fs.cfdr.buf == nil {
-		fs.cfdr.buf = make([]byte, 0, math.MaxUint16)
-	} else {
-		fs.cfdr.buf = fs.cfdr.buf[:0]
-	}
 }
 
 // seekTo ensures the decompressor is positioned at the given uncompressed byte offset within the folder,
 // rewinding and replaying from the start if the current position is past the target.
-func (fs *folderState) seekTo(decomp Decompressor, target uint32) error {
+func (fs *folderState) seekTo(target uint32) error {
 	// If the cache is ahead of target, we must rewind from the start.
-	if fs.decomp == nil || fs.pos > target {
-		if fs.decomp != nil {
-			fs.decomp.Close()
-			fs.decomp = nil
-		}
-		fs.resetCFDataReader()
-		fs.decomp = decomp(&fs.cfdr)
-		fs.pos = 0
-	}
-	// Skip forward to target.
-	if fs.pos < target {
-		toSkip := int64(target - fs.pos)
-		n, err := io.CopyN(io.Discard, fs.decomp, toSkip)
-		fs.pos += uint32(n)
-		if err != nil {
+	if fs.dec == nil || fs.pos > target {
+		if err := fs.rewind(); err != nil {
 			return err
 		}
+	}
+	// Skip forward to target.
+	for fs.pos < target {
+		if fs.outPos == len(fs.out) {
+			if err := fs.nextBlock(); err != nil {
+				return err
+			}
+		}
+		n := min(len(fs.out)-fs.outPos, int(target-fs.pos))
+		fs.outPos += n
+		fs.pos += uint32(n)
 	}
 	return nil
 }
 
-// cfDataReader reads compressed payloads from sequential CFDATA blocks.
-type cfDataReader struct {
-	reader    *Reader
-	off       int64
-	cbCFData  uint8
-	remaining uint16 // blocks left to read
-	buf       []byte
-	bufPos    int
+// rewind positions the folder at its first CFDATA block.
+func (fs *folderState) rewind() error {
+	if fs.dec == nil {
+		dcomp := fs.reader.decompressor(fs.comp)
+		if dcomp == nil {
+			return ErrAlgorithm
+		}
+		dec, err := dcomp(fs.comp.Level(), fs.comp.Memory())
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrFormat, err)
+		}
+		fs.dec = dec
+		fs.in = make([]byte, math.MaxUint16)
+		fs.out = make([]byte, 0, blockSize)
+	} else {
+		fs.dec.Reset()
+	}
+	fs.off = int64(fs.coffCabStart)
+	fs.blocks = fs.cCFData
+	fs.out = fs.out[:0]
+	fs.outPos = 0
+	fs.pos = 0
+	return nil
 }
 
-func (cr *cfDataReader) Read(p []byte) (int, error) {
-	for cr.bufPos >= len(cr.buf) {
-		if cr.remaining == 0 {
-			return 0, io.EOF
-		}
-		if err := cr.nextBlock(); err != nil {
+// read reads uncompressed data from the current position into p.
+func (fs *folderState) read(p []byte) (int, error) {
+	if fs.outPos == len(fs.out) {
+		if err := fs.nextBlock(); err != nil {
 			return 0, err
 		}
 	}
-	n := copy(p, cr.buf[cr.bufPos:])
-	cr.bufPos += n
+	n := copy(p, fs.out[fs.outPos:])
+	fs.outPos += n
+	fs.pos += uint32(n)
 	return n, nil
 }
 
-// nextBlock reads the next CFDATA block and resets the read position within it.
-func (cr *cfDataReader) nextBlock() error {
-	payload, n, err := readCFDataBlock(cr.reader.r, cr.off, cr.cbCFData, cr.buf, !cr.reader.SkipChecksum)
+// nextBlock reads and decompresses the next CFDATA block.
+func (fs *folderState) nextBlock() error {
+	if fs.blocks == 0 {
+		return io.ErrUnexpectedEOF
+	}
+	payload, cbUncomp, n, err := readCFDataBlock(fs.reader.r, fs.off, fs.cbCFData, fs.in, !fs.reader.SkipChecksum)
 	if err != nil {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
 		return err
 	}
-	cr.off += n
-	cr.buf = payload
-	cr.bufPos = 0
-	cr.remaining--
+	if cbUncomp == 0 || cbUncomp > blockSize {
+		return fmt.Errorf("%w: invalid data block size", ErrFormat)
+	}
+	out, err := fs.dec.Decode(fs.out[:cbUncomp], payload)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrFormat, err)
+	}
+	fs.off += n
+	fs.blocks--
+	fs.out = out
+	fs.outPos = 0
 	return nil
 }

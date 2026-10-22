@@ -2,6 +2,7 @@ package cabinet_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"slices"
@@ -123,23 +124,108 @@ func TestChecksum(t *testing.T) {
 	cfDataOff := int(data[36]) | int(data[37])<<8 | int(data[38])<<16 | int(data[39])<<24
 	data[cfDataOff] ^= 0xFF
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			r, err := cabinet.NewReader(bytes.NewReader(data))
 			if err != nil {
 				t.Fatalf("NewReader: %v", err)
 			}
-			r.SkipChecksum = tt.skipChecksum
+			r.SkipChecksum = test.skipChecksum
 			rc, err := r.Files[0].Open()
 			if err != nil {
 				t.Fatalf("Open: %v", err)
 			}
 			defer rc.Close()
 			_, err = io.ReadAll(rc)
-			if err != tt.wantErr {
-				t.Errorf("got error %v, want %v", err, tt.wantErr)
+			if err != test.wantErr {
+				t.Errorf("got error %v, want %v", err, test.wantErr)
 			}
 		})
+	}
+}
+
+// TestReaderErrors verifies the errors for a cabinet whose folder or data block is corrupt.
+func TestReaderErrors(t *testing.T) {
+	var buf seekBuffer
+	w := cabinet.NewWriter(&buf)
+	if err := w.SetCompression(cabinet.None); err != nil {
+		t.Fatal(err)
+	}
+	wr, err := w.Create("test.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wr.Write([]byte("data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	src := buf.buf
+
+	tests := []struct {
+		name   string
+		offset int
+		data   uint16
+		err    error
+	}{
+		// The first CFFOLDER entry follows the 36-byte header, with the compression type at offset 6.
+		{"unknown compression type", 42, 5, cabinet.ErrAlgorithm},
+		// The CFFOLDER entry starts with the offset of its first CFDATA block, whose uncompressed size is at offset 6.
+		{"block size mismatch", int(binary.LittleEndian.Uint32(src[36:])) + 6, 3, cabinet.ErrFormat},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			data := bytes.Clone(src)
+			binary.LittleEndian.PutUint16(data[test.offset:], test.data)
+			r, err := cabinet.NewReader(bytes.NewReader(data))
+			if err != nil {
+				t.Fatalf("NewReader: %v", err)
+			}
+			r.SkipChecksum = true
+			rc, err := r.Files[0].Open()
+			if err == nil {
+				_, err = io.ReadAll(rc)
+				rc.Close()
+			}
+			if !errors.Is(err, test.err) {
+				t.Errorf("got error %v, want %v", err, test.err)
+			}
+		})
+	}
+}
+
+// TestReader_RegisterDecompressor verifies that a Reader's decompressor overrides the package-level one.
+func TestReader_RegisterDecompressor(t *testing.T) {
+	var buf seekBuffer
+	w := cabinet.NewWriter(&buf)
+	if _, err := w.Create("test.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, _ := cabinet.Decompressors.Load(cabinet.MSZIP)
+	t.Cleanup(func() { cabinet.Decompressors.Store(cabinet.MSZIP, orig) })
+
+	errPkg, errReader := errors.New("package"), errors.New("reader")
+	cabinet.RegisterDecompressor(cabinet.MSZIP, func(int, int) (cabinet.Decoder, error) { return nil, errPkg })
+
+	r, err := cabinet.NewReader(bytes.NewReader(buf.buf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Files[0].Open(); !errors.Is(err, errPkg) {
+		t.Error("Open did not use the package-level decompressor")
+	}
+	r.RegisterDecompressor(cabinet.MSZIP, func(int, int) (cabinet.Decoder, error) { return nil, errReader })
+	if _, err := r.Files[0].Open(); !errors.Is(err, errReader) {
+		t.Error("Open did not use the Reader's decompressor")
+	}
+	r.RegisterDecompressor(cabinet.MSZIP, nil)
+	if _, err := r.Files[0].Open(); !errors.Is(err, errPkg) {
+		t.Error("Open did not use the package-level decompressor after restoring it")
 	}
 }
 
@@ -154,11 +240,11 @@ func TestFSConflicts(t *testing.T) {
 		{"directory then file conflict", []string{"a/b", "a"}},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			var buf seekBuffer
 			w := cabinet.NewWriter(&buf)
-			for _, name := range tt.files {
+			for _, name := range test.files {
 				wr, err := w.Create(name)
 				if err != nil {
 					t.Fatalf("Create %q: %v", name, err)
@@ -176,7 +262,7 @@ func TestFSConflicts(t *testing.T) {
 				t.Fatalf("NewReader: %v", err)
 			}
 
-			for _, name := range tt.files {
+			for _, name := range test.files {
 				if _, err := r.Open(name); !errors.Is(err, cabinet.ErrDuplicate) {
 					t.Errorf("Open(%q): want error %q, got %q", name, cabinet.ErrDuplicate, err)
 				}

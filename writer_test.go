@@ -2,6 +2,8 @@ package cabinet_test
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"os"
@@ -214,6 +216,104 @@ func TestWriter_AddPath(t *testing.T) {
 	}
 }
 
+// TestWriter_RegisterCompressor verifies that a Writer's compressor overrides the package-level one.
+func TestWriter_RegisterCompressor(t *testing.T) {
+	orig, _ := cabinet.Compressors.Load(cabinet.MSZIP)
+	t.Cleanup(func() { cabinet.Compressors.Store(cabinet.MSZIP, orig) })
+
+	errPkg, errWriter := errors.New("package"), errors.New("writer")
+	cabinet.RegisterCompressor(cabinet.MSZIP, func(int, int) (cabinet.Encoder, error) { return nil, errPkg })
+
+	w := cabinet.NewWriter(&seekBuffer{})
+	if _, err := w.Create("test.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); !errors.Is(err, errPkg) {
+		t.Error("package-level compressor not used")
+	}
+
+	w = cabinet.NewWriter(&seekBuffer{})
+	w.RegisterCompressor(cabinet.MSZIP, func(int, int) (cabinet.Encoder, error) { return nil, errWriter })
+	if _, err := w.Create("test.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); !errors.Is(err, errWriter) {
+		t.Error("Writer's compressor not used")
+	}
+}
+
+// TestWriter_SetCompression verifies that changing the compression starts a new folder.
+func TestWriter_SetCompression(t *testing.T) {
+	tests := []struct {
+		comp   cabinet.Compression
+		folder uint16
+		want   cabinet.Compression
+	}{
+		{cabinet.MSZIP, 0, cabinet.MSZIP},
+		{cabinet.None, 1, cabinet.None},
+		{cabinet.None, 1, cabinet.None},
+		{cabinet.MSZIP, 2, cabinet.MSZIP},
+	}
+	var buf seekBuffer
+	w := cabinet.NewWriter(&buf)
+	for i, test := range tests {
+		if err := w.SetCompression(test.comp); err != nil {
+			t.Fatal(err)
+		}
+		wr, err := w.Create(fmt.Sprintf("file%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := wr.Write([]byte("data")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := cabinet.NewReader(bytes.NewReader(buf.buf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, test := range tests {
+		if got := r.Files[i].FolderIndex(); got != test.folder {
+			t.Errorf("file %d: folder index %d, want %d", i, got, test.folder)
+		}
+		if got := r.Files[i].Compression(); got != test.want {
+			t.Errorf("file %d: Compression() = %s, want %s", i, got, test.want)
+		}
+	}
+}
+
+// TestWriter_SetCompression_Errors verifies that SetCompression rejects a value the writer cannot compress.
+func TestWriter_SetCompression_Errors(t *testing.T) {
+	tests := []struct {
+		comp cabinet.Compression
+		want string
+	}{
+		{cabinet.Compression(5), "cabinet: invalid compression type 5"},
+		{cabinet.Compression(0x2001), "cabinet: reserved compression bits set"},
+		{cabinet.TypeLevelMemory(cabinet.None, 1, 0), "cabinet: invalid None level: want 0"},
+		{cabinet.TypeLevelMemory(cabinet.None, 0, 15), "cabinet: invalid None memory: want 0"},
+		{cabinet.TypeLevelMemory(cabinet.MSZIP, 9, 0), "cabinet: invalid MSZIP level: want 0"},
+		{cabinet.TypeLevelMemory(cabinet.MSZIP, 0, 15), "cabinet: invalid MSZIP memory: want 0"},
+		{cabinet.TypeLevelMemory(cabinet.LZX, 1, 21), "cabinet: invalid LZX level: want 0"},
+		{cabinet.LZXWindow(14), "cabinet: invalid LZX memory: want value in range [15, 21]"},
+		{cabinet.LZXWindow(32), "cabinet: invalid LZX memory: want value in range [15, 21]"},
+		{cabinet.TypeLevelMemory(cabinet.Quantum, 0, 10), "cabinet: invalid Quantum level: want value in range [1, 7]"},
+		{cabinet.TypeLevelMemory(cabinet.Quantum, 1, 22), "cabinet: invalid Quantum memory: want value in range [10, 21]"},
+		{cabinet.TypeLevelMemory(cabinet.Quantum, 1, 10), "cabinet: unsupported compression algorithm"},
+	}
+	var buf seekBuffer
+	w := cabinet.NewWriter(&buf)
+	for _, test := range tests {
+		if err := w.SetCompression(test.comp); err == nil || err.Error() != test.want {
+			t.Errorf("SetCompression(%#v) = %v, want %q", test.comp, err, test.want)
+		}
+	}
+}
+
 // TestAutoSplit verifies that a folder exceeding the threshold is split into multiple folders.
 func TestAutoSplit(t *testing.T) {
 	const threshold = 1 << 20 // 1 MB
@@ -223,7 +323,6 @@ func TestAutoSplit(t *testing.T) {
 
 	var buf seekBuffer
 	w := cabinet.NewWriter(&buf)
-	w.SetCompression(cabinet.None)
 	for _, name := range []string{"a.txt", "b.txt", "c.txt"} {
 		wr, err := w.Create(name)
 		if err != nil {
@@ -266,31 +365,29 @@ func TestAutoSplit(t *testing.T) {
 	}
 }
 
-// TestAlgorithmError verifies that an unregistered compressor returns ErrAlgorithm.
-func TestAlgorithmError(t *testing.T) {
-	var buf seekBuffer
-	w := cabinet.NewWriter(&buf)
-	w.SetCompression(cabinet.Quantum)
-	wr, err := w.Create("test.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := wr.Write([]byte("data")); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Close(); err == nil {
-		t.Fatal("expected ErrAlgorithm from Close, got nil")
-	}
-}
-
-// TestDoubleClose verifies the second Close returns an error.
-func TestDoubleClose(t *testing.T) {
+// TestWriterUseAfterClose verifies that every method that can fail returns ErrClosed after Close.
+func TestWriterUseAfterClose(t *testing.T) {
 	var buf seekBuffer
 	w := cabinet.NewWriter(&buf)
 	if err := w.Close(); err != nil {
-		t.Fatalf("first Close: %v", err)
+		t.Fatalf("Close: %v", err)
 	}
-	if err := w.Close(); err == nil {
-		t.Fatal("expected error on second Close, got nil")
+	if err := w.Close(); !errors.Is(err, cabinet.ErrClosed) {
+		t.Errorf("Close: got %v, want %v", err, cabinet.ErrClosed)
+	}
+	if err := w.SetCompression(cabinet.LZX); !errors.Is(err, cabinet.ErrClosed) {
+		t.Errorf("SetCompression: got %v, want %v", err, cabinet.ErrClosed)
+	}
+	if _, err := w.Create("a.txt"); !errors.Is(err, cabinet.ErrClosed) {
+		t.Errorf("Create: got %v, want %v", err, cabinet.ErrClosed)
+	}
+	if _, err := w.CreateHeader(&cabinet.FileHeader{Name: "a.txt"}); !errors.Is(err, cabinet.ErrClosed) {
+		t.Errorf("CreateHeader: got %v, want %v", err, cabinet.ErrClosed)
+	}
+	if err := w.AddFS(fstest.MapFS{}); !errors.Is(err, cabinet.ErrClosed) {
+		t.Errorf("AddFS: got %v, want %v", err, cabinet.ErrClosed)
+	}
+	if err := w.AddPath("a.txt", "writer_test.go"); !errors.Is(err, cabinet.ErrClosed) {
+		t.Errorf("AddPath: got %v, want %v", err, cabinet.ErrClosed)
 	}
 }

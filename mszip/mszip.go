@@ -1,4 +1,4 @@
-// Package mszip implements the MS-ZIP compression format as defined by
+// Package mszip implements the MSZIP compression format as defined by
 // [MS-MCI]: Microsoft ZIP (MSZIP) Compression and Decompression Data Structure
 // https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-mci/27f0a9bf-9567-4e40-ad66-6ae9ab9d2786
 //
@@ -14,4 +14,4 @@ const blockSize = 1 << 15
 
 var blockSig = [2]byte{'C', 'K'}
 
-var errClosed = errors.New("mszip: read/write on closed stream")
+var errBlockSize = errors.New("mszip: invalid block size")

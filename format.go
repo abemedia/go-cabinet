@@ -18,6 +18,13 @@ const (
 	flagNextCabinet    = 0x0002
 	flagReservePresent = 0x0004
 
+	// Fields of a folder's compression type.
+	tcompMaskType    = 0x000F
+	tcompMaskLevel   = 0x00F0
+	tcompShiftLevel  = 4
+	tcompMaskMemory  = 0x1F00
+	tcompShiftMemory = 8
+
 	// File attribute flags.
 	attrReadOnly  = 0x0001
 	attrHidden    = 0x0002
@@ -31,6 +38,8 @@ const (
 	cfFolderSize = 8  // bytes in a CFFOLDER entry (no reserve)
 	cfFileSize   = 16 // bytes in a CFFILE entry (excluding szName)
 	cfDataSize   = 8  // bytes in a CFDATA header (no reserve)
+
+	blockSize = 1 << 15 // max uncompressed bytes in a CFDATA block
 )
 
 // cfHeader mirrors the on-disk CFHEADER layout.
@@ -196,8 +205,9 @@ func writeCFFile(w io.Writer, rec cfFileRecord) error {
 }
 
 // readCFDataBlock reads one CFDATA block from r at off, skipping cbCFData
-// reserved bytes after the fixed header. It returns the compressed payload
-// and the total number of bytes consumed (header + reserved + payload).
+// reserved bytes after the fixed header. It returns the compressed payload,
+// its uncompressed size and the total number of bytes consumed (header +
+// reserved + payload).
 // If verifyChecksum is true and the stored checksum does not match, it returns ErrChecksum.
 func readCFDataBlock(
 	r io.ReaderAt,
@@ -205,23 +215,23 @@ func readCFDataBlock(
 	cbCFData uint8,
 	buf []byte,
 	verifyChecksum bool,
-) (payload []byte, n int64, err error) {
+) (payload []byte, cbUncomp uint16, n int64, err error) {
 	var hdr [cfDataSize]byte
 	if _, err = r.ReadAt(hdr[:], off); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	csum := binary.LittleEndian.Uint32(hdr[0:4])
 	cbData := binary.LittleEndian.Uint16(hdr[4:6])
-	cbUncomp := binary.LittleEndian.Uint16(hdr[6:8])
+	cbUncomp = binary.LittleEndian.Uint16(hdr[6:8])
 
 	payload = buf[:cbData]
 	if _, err = r.ReadAt(payload, off+cfDataSize+int64(cbCFData)); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	if verifyChecksum && csum != 0 && checksumData(payload, cbUncomp) != csum {
-		return nil, 0, ErrChecksum
+		return nil, 0, 0, ErrChecksum
 	}
-	return payload, cfDataSize + int64(cbCFData) + int64(cbData), nil
+	return payload, cbUncomp, cfDataSize + int64(cbCFData) + int64(cbData), nil
 }
 
 // writeCFDataBlock writes one CFDATA block to w and returns the number of

@@ -185,7 +185,9 @@ func TestWriter(t *testing.T) {
 			w := cabinet.NewWriter(tmp)
 			for _, testFolder := range test.Folders {
 				w.FlushFolder()
-				w.SetCompression(testFolder.Comp)
+				if err := w.SetCompression(testFolder.Comp); err != nil {
+					t.Fatal(err)
+				}
 				for _, testFile := range testFolder.Files {
 					wr, err := w.CreateHeader(&testFile.Header)
 					if err != nil {
