@@ -42,8 +42,8 @@ jobs:
         shell: bash
         run: |
           for _ in $(seq ${{ env.BENCH_COUNT }}); do
-            ./after.test -test.run='^$' -test.bench=. | tee -a after
-            ./before.test -test.run='^$' -test.bench=. | tee -a before
+            ./after.test -test.run='^$' -test.bench=. -test.benchtime=100ms | tee -a after
+            ./before.test -test.run='^$' -test.bench=. -test.benchtime=100ms | tee -a before
           done
 
       - name: Compare benchmarks
