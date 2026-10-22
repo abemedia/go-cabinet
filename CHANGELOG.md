@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0](https://github.com/abemedia/go-cabinet/compare/v0.2.0...v0.3.0) (2026-10-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* Custom codecs implement the Encoder and Decoder interfaces instead of wrapping io.Writer and io.Reader. mszip.NewWriter and mszip.NewReader are replaced by mszip.NewEncoder and mszip.NewDecoder. SetCompression rejects an invalid or unregistered method immediately instead of Close failing later.
+* MSZip is now MSZIP and Compression.String returns MSZIP instead of MS-ZIP.
+
+### Features
+
+* add compression settings and block-based codecs ([#25](https://github.com/abemedia/go-cabinet/issues/25)) ([bbe9967](https://github.com/abemedia/go-cabinet/commit/bbe996737d11cf4e4647493bf9e28abe5051f8ba))
+
+
+### Code Refactoring
+
+* rename MSZip to MSZIP ([#23](https://github.com/abemedia/go-cabinet/issues/23)) ([4db1b9c](https://github.com/abemedia/go-cabinet/commit/4db1b9c3f6a10ed50fc1b9f3d5580cda7686221b))
+
 ## [0.2.0](https://github.com/abemedia/go-cabinet/compare/v0.1.0...v0.2.0) (2026-05-05)
 
 
