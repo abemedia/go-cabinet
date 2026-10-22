@@ -3,7 +3,6 @@
 <img align="right" width="125" alt="" src="assets/logo_small.png">
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/abemedia/go-cabinet.svg)](https://pkg.go.dev/github.com/abemedia/go-cabinet)
-[![Go Report Card](https://goreportcard.com/badge/github.com/abemedia/go-cabinet)](https://goreportcard.com/report/github.com/abemedia/go-cabinet)
 [![Codecov](https://codecov.io/gh/abemedia/go-cabinet/branch/master/graph/badge.svg)](https://codecov.io/gh/abemedia/go-cabinet)
 
 A pure Go library for reading, writing, and extracting Microsoft Cabinet (`.cab`) files - commonly used in Windows Update packages, driver distributions, and software installers.
