@@ -250,9 +250,9 @@ func TestWriter_SetCompression(t *testing.T) {
 		want   cabinet.Compression
 	}{
 		{cabinet.MSZIP, 0, cabinet.MSZIP},
-		{cabinet.None, 1, cabinet.None},
-		{cabinet.None, 1, cabinet.None},
-		{cabinet.MSZIP, 2, cabinet.MSZIP},
+		{cabinet.LZX, 1, cabinet.LZXWindow(21)},
+		{cabinet.LZXWindow(21), 1, cabinet.LZXWindow(21)},
+		{cabinet.LZXWindow(15), 2, cabinet.LZXWindow(15)},
 	}
 	var buf seekBuffer
 	w := cabinet.NewWriter(&buf)

@@ -72,6 +72,16 @@ func TestRoundTrip(t *testing.T) {
 			},
 		},
 		{
+			name:        "lzx",
+			compression: cabinet.LZX,
+			files: []file{
+				{"f1.txt", bytes.Repeat([]byte("hello compressed world "), 5000)},
+				{"f2.bin", bytes.Repeat([]byte{0xE8, 0x10, 0x00, 0x00, 0x00, 0x90}, 20000)},
+				{"empty.txt", nil},
+				{"f3.txt", []byte("short")},
+			},
+		},
+		{
 			name:        "empty",
 			compression: cabinet.None,
 		},

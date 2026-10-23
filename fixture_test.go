@@ -2,6 +2,7 @@ package cabinet_test
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"io"
 	"os"
@@ -45,8 +46,9 @@ func loadAllCabTests(t *testing.T) []CabTest {
 	var fixtures []struct {
 		Name    string `json:"name"`
 		Folders []struct {
-			Compression string `json:"compression"`
-			Files       []struct {
+			Compression       string `json:"compression"`
+			CompressionMemory int    `json:"compressionMemory"`
+			Files             []struct {
 				Name  string    `json:"name"`
 				Attrs string    `json:"attrs,omitempty"`
 				MTime time.Time `json:"mtime,omitzero"`
@@ -70,7 +72,7 @@ func loadAllCabTests(t *testing.T) []CabTest {
 			case "mszip":
 				folder.Comp = cabinet.MSZIP
 			case "lzx":
-				folder.Comp = cabinet.LZX
+				folder.Comp = cabinet.LZXWindow(cmp.Or(fixtureFolder.CompressionMemory, 21))
 			case "quantum":
 				folder.Comp = cabinet.Quantum
 			default:
@@ -136,6 +138,9 @@ func TestReader(t *testing.T) {
 					}
 					if int(f.FolderIndex()) != fi {
 						t.Errorf("%q FolderIndex: got %d, want %d", f.Name, f.FolderIndex(), fi)
+					}
+					if got := f.Compression(); got != testFolder.Comp {
+						t.Errorf("%q Compression: got %s, want %s", f.Name, got, testFolder.Comp)
 					}
 
 					rc2, err := f.Open()
