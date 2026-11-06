@@ -67,6 +67,9 @@ func (w *Writer) SetCompression(c Compression) error {
 	if w.closed {
 		return errClosed
 	}
+	if c.Type() == LZX && c.Memory() == 0 {
+		c |= 21 << tcompShiftMemory
+	}
 	if c == w.current.comp {
 		return nil
 	}
