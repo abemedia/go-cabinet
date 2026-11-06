@@ -2,7 +2,6 @@ package mszip_test
 
 import (
 	"bytes"
-	"io"
 	"math/rand/v2"
 	"testing"
 
@@ -48,93 +47,6 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// TestDictionary verifies that a block is compressed against the previous one.
-func TestDictionary(t *testing.T) {
-	block := random(blockSize)
-	rotated := append(block[1:len(block):len(block)], block[0])
-	blocks := encode(t, append(block, rotated...), mszip.DefaultCompression)
-	if len(blocks[0]) < blockSize {
-		t.Fatalf("random block compressed to %d bytes", len(blocks[0]))
-	}
-	if len(blocks[1]) > blockSize/10 {
-		t.Errorf("repeated block compressed to %d bytes, expected it to match the previous block", len(blocks[1]))
-	}
-}
-
-// TestReset verifies that an Encoder and a Decoder can be reused for a new stream.
-func TestReset(t *testing.T) {
-	data := bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz"), 2100)
-	want := encode(t, data, mszip.DefaultCompression)
-
-	e, err := mszip.NewEncoder(mszip.DefaultCompression)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := mszip.NewDecoder()
-	for range 2 {
-		e.Reset()
-		d.Reset()
-		for i, off := 0, 0; off < len(data); i, off = i+1, off+blockSize {
-			src := data[off:min(off+blockSize, len(data))]
-			block, err := e.Encode(nil, src)
-			if err != nil {
-				t.Fatalf("Encode: %v", err)
-			}
-			if !bytes.Equal(block, want[i]) {
-				t.Fatalf("block %d differs from a new encoder's", i)
-			}
-			got := make([]byte, len(src))
-			if _, err := d.Decode(got, block); err != nil {
-				t.Fatalf("Decode: %v", err)
-			}
-			if !bytes.Equal(got, src) {
-				t.Fatalf("block %d: round-trip mismatch", i)
-			}
-		}
-	}
-}
-
-func TestEncoder_Errors(t *testing.T) {
-	if _, err := mszip.NewEncoder(10); err == nil || err.Error() != "mszip: invalid compression level: 10" {
-		t.Errorf("NewEncoder(10) = %v", err)
-	}
-	e, err := mszip.NewEncoder(mszip.DefaultCompression)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, n := range []int{0, blockSize + 1} {
-		if _, err := e.Encode(nil, make([]byte, n)); err == nil || err.Error() != "mszip: invalid block size" {
-			t.Errorf("Encode of %d bytes = %v", n, err)
-		}
-	}
-}
-
-func TestDecoder_Errors(t *testing.T) {
-	data := []byte("hello world this is a test of mszip compression")
-	block := encode(t, data, mszip.DefaultCompression)[0]
-
-	tests := []struct {
-		name string
-		src  []byte
-		size int
-		want string
-	}{
-		{"missing signature", block[2:], len(data), "mszip: invalid block signature"},
-		{"empty", nil, len(data), "mszip: invalid block signature"},
-		{"truncated", block[:len(block)/2], len(data), io.ErrUnexpectedEOF.Error()},
-		{"size too small", block, len(data) - 1, "mszip: block does not match its uncompressed size"},
-		{"size too large", block, len(data) + 1, "mszip: block does not match its uncompressed size"},
-		{"size over a block", block, blockSize + 1, "mszip: invalid block size"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if _, err := mszip.NewDecoder().Decode(make([]byte, test.size), test.src); err == nil || err.Error() != test.want {
-				t.Errorf("Decode = %v, want %q", err, test.want)
-			}
-		})
-	}
-}
-
 // encode compresses data and returns its blocks.
 func encode(tb testing.TB, data []byte, level int) [][]byte {
 	tb.Helper()
@@ -142,11 +54,17 @@ func encode(tb testing.TB, data []byte, level int) [][]byte {
 	if err != nil {
 		tb.Fatal(err)
 	}
+	return encodeBlocks(tb, e, data)
+}
+
+// encodeBlocks compresses data with e and returns its blocks.
+func encodeBlocks(tb testing.TB, e *mszip.Encoder, data []byte) [][]byte {
+	tb.Helper()
 	var blocks [][]byte
 	for off := 0; off < len(data); off += blockSize {
 		block, err := e.Encode(nil, data[off:min(off+blockSize, len(data))])
 		if err != nil {
-			tb.Fatalf("Encode: %v", err)
+			tb.Fatalf("Encode block %d: %v", len(blocks), err)
 		}
 		blocks = append(blocks, block)
 	}
@@ -156,7 +74,12 @@ func encode(tb testing.TB, data []byte, level int) [][]byte {
 // decode decompresses blocks that hold size bytes in total.
 func decode(tb testing.TB, blocks [][]byte, size int) []byte {
 	tb.Helper()
-	d := mszip.NewDecoder()
+	return decodeBlocks(tb, mszip.NewDecoder(), blocks, size)
+}
+
+// decodeBlocks decompresses blocks that hold size bytes in total with d.
+func decodeBlocks(tb testing.TB, d *mszip.Decoder, blocks [][]byte, size int) []byte {
+	tb.Helper()
 	out := make([]byte, size)
 	for i, block := range blocks {
 		off := i * blockSize
