@@ -3,6 +3,7 @@ version: '2'
 linters:
   default: all
   disable:
+    - cyclop
     - depguard
     - err113
     - errorlint
@@ -11,6 +12,7 @@ linters:
     - exhaustruct_v5
     - forcetypeassert
     - funcorder
+    - funlen
     - gochecknoglobals
     - gochecknoinits
     - gocyclo
@@ -18,6 +20,7 @@ linters:
     - gosec
     - ireturn
     - mnd
+    - nestif
     - nlreturn
     - noinlineerr
     - nonamedreturns
@@ -27,11 +30,6 @@ linters:
     - wsl
     - wsl_v5
   settings:
-    cyclop:
-      max-complexity: 20
-    funlen:
-      # Complexity is already covered by cyclop and gocognit.
-      statements: -1
     govet:
       enable-all: true
       disable: [fieldalignment]
@@ -44,8 +42,6 @@ linters:
       - std-error-handling
     rules:
       - linters:
-          - cyclop
-          - funlen
           - gocognit
           - goconst
           - gocritic
