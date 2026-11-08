@@ -39,7 +39,8 @@ const (
 	cfFileSize   = 16 // bytes in a CFFILE entry (excluding szName)
 	cfDataSize   = 8  // bytes in a CFDATA header (no reserve)
 
-	blockSize = 1 << 15 // max uncompressed bytes in a CFDATA block
+	blockSize     = 1 << 15                    // max uncompressed bytes in a CFDATA block
+	maxFolderSize = math.MaxUint16 * blockSize // max uncompressed bytes in a CFFOLDER
 )
 
 // cfHeader mirrors the on-disk CFHEADER layout.
