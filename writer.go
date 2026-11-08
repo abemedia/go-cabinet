@@ -203,7 +203,7 @@ func (w *Writer) addFS(prefix string, fsys fs.FS) error {
 // addFile enqueues a single file entry in the current folder.
 func (w *Writer) addFile(name, path string, info fs.FileInfo, open func(string) (fs.File, error)) error {
 	size := info.Size()
-	if size > math.MaxUint32 {
+	if size > maxFolderSize {
 		return fmt.Errorf("cabinet: file %q too large (%d bytes)", name, size)
 	}
 	fh := FileHeader{
@@ -517,7 +517,7 @@ type fileEntry struct {
 	folderIdx       uint16
 }
 
-// limitWriter caps writes at MaxUint32 and counts bytes for staged files.
+// limitWriter caps writes at maxFolderSize and counts bytes for staged files.
 type limitWriter struct {
 	f   *os.File
 	n   uint32
@@ -525,8 +525,8 @@ type limitWriter struct {
 }
 
 func (lw *limitWriter) Write(p []byte) (int, error) {
-	if int64(lw.n)+int64(len(p)) > math.MaxUint32 {
-		lw.err = errors.New("cabinet: file too large (exceeds 4 GiB)")
+	if int64(lw.n)+int64(len(p)) > maxFolderSize {
+		lw.err = fmt.Errorf("cabinet: file too large (exceeds %d bytes)", maxFolderSize)
 		return 0, lw.err
 	}
 	n, err := lw.f.Write(p)
@@ -535,4 +535,4 @@ func (lw *limitWriter) Write(p []byte) (int, error) {
 	return n, lw.err
 }
 
-var autoSplitThreshold uint64 = 0x7FFF8000 // ~2 GB
+var autoSplitThreshold uint64 = maxFolderSize // ~2 GB
