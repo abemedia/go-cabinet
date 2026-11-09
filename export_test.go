@@ -22,3 +22,6 @@ var (
 	Compressors   = &compressors
 	Decompressors = &decompressors
 )
+
+// ExhaustStagedFileSizeLimit makes the next nonempty staged write hit the size limit.
+func ExhaustStagedFileSizeLimit(w *Writer) { w.stagingLW.n = maxFolderSize }

@@ -25,8 +25,9 @@ type Writer struct {
 	folders []*folderEntry
 	current *folderEntry
 
-	stagingLW    *limitWriter // open staged-file writer (nil if none)
-	stagingEntry *fileEntry   // entry whose size is pending
+	stagingLW     *limitWriter // open staged-file writer (nil if none)
+	stagingEntry  *fileEntry   // entry whose size is pending
+	stagingFolder *folderEntry // folder owning the pending entry, even after a flush
 
 	tmpDir  string // lazily-created temp directory for staged files
 	cleanup runtime.Cleanup
@@ -147,6 +148,7 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 	}
 	w.current.files = append(w.current.files, entry)
 	w.stagingEntry = entry
+	w.stagingFolder = w.current
 	return lw, nil
 }
 
@@ -316,12 +318,14 @@ func (w *Writer) closeStagedFile() error {
 		return nil
 	}
 	lw := w.stagingLW
+	folder := w.stagingFolder
 	w.stagingLW = nil
+	w.stagingFolder = nil
 	if lw.err != nil {
 		// The error was already returned by Write; drop the broken entry and
 		// continue so the next CreateHeader/Close call is not affected.
 		lw.f.Close()
-		w.current.files = w.current.files[:len(w.current.files)-1]
+		folder.files = folder.files[:len(folder.files)-1]
 		w.stagingEntry = nil
 		return nil //nolint:nilerr
 	}
